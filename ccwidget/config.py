@@ -34,8 +34,8 @@ class Config:
     installed_version: str | None = None
 
     # --- janela ------------------------------------------------------------
-    # mode: "mini" (so o circulo), "summary" (sessao + semana) ou "full".
-    mode: str = "summary"
+    # mode: "mini" (so o circulo) ou "panel" (sessao e semana).
+    mode: str = "panel"
     # theme: "dark", "light" ou "auto" (segue a preferencia do Windows).
     theme: str = "auto"
     pos_x: int = 40

@@ -8,7 +8,7 @@
 
 <img src="docs/painel-escuro.png" width="270" alt="Painel do widget">
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.1.0-d97757)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.1.1-d97757)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-4d7a3a)
 ![Python](https://img.shields.io/badge/python-3.10%2B-d97757)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-6d6659)

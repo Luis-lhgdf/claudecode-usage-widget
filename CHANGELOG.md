@@ -3,6 +3,15 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.1.1] — 2026-09-02
+
+### Corrigido
+
+- O valor padrão de `mode` ainda era `"summary"`, nome de um modo que deixou de
+  existir quando os modos foram reduzidos a `mini` e `panel`. Numa instalação
+  nova o widget caía no fallback e funcionava, mas gravava um modo inválido na
+  configuração. Encontrado ao rodar o instalador do zero.
+
 ## [0.1.0] — 2026-09-02
 
 Primeira versão pública.
