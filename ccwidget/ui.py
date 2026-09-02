@@ -77,9 +77,16 @@ class Mascot(tk.Canvas):
             parent, width=MASCOT_W * scale, height=MASCOT_H * scale,
             bg=bg, highlightthickness=0, bd=0,
         )
+        self._scale = scale
+        self._bg = bg
         # A referencia precisa sobreviver: o tkinter nao segura PhotoImage.
         self._image = render_mascot(scale, bg=bg)
-        self.create_image(0, 0, image=self._image, anchor="nw")
+        self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
+
+    def set_frame(self, frame: int) -> None:
+        """Troca o quadro da caminhada."""
+        self._image = render_mascot(self._scale, bg=self._bg, frame=frame)
+        self.itemconfigure(self._image_id, image=self._image)
 
 
 class Ring(tk.Canvas):
@@ -100,7 +107,10 @@ class Ring(tk.Canvas):
         # Alturas em fracao do diametro, com folga nas duas pontas: o mascote
         # nao encosta no anel e a hora nao encosta na base.
         self._mascot = render_mascot(2, bg=P["bg"])
-        self.create_image(size / 2, size * 0.30, image=self._mascot, anchor="center")
+        self._mascot_y = size * 0.30
+        self._mascot_id = self.create_image(
+            size / 2, self._mascot_y, image=self._mascot, anchor="center"
+        )
         self._value = self.create_text(
             size / 2, size * 0.555, text="--", fill=P["fg"],
             font=("Segoe UI", 14, "bold"),
@@ -110,19 +120,27 @@ class Ring(tk.Canvas):
             font=("Segoe UI", 8),
         )
 
-    def set_loading(self, phase: float) -> None:
-        """Um quarto de anel girando, no lugar do arco de progresso."""
-        self._image = render_ring(
-            self.size, 25, P["accent"], start=phase % 1.0
-        )
+    def set_loading(self, phase: float, frame: int = 0) -> None:
+        """Anel girando e o mascote caminhando, enquanto o valor nao chega."""
+        self._image = render_ring(self.size, 25, P["accent"], start=phase % 1.0)
         self.itemconfigure(self._image_id, image=self._image)
+        self._set_mascot(frame)
         self.itemconfigure(self._value, text="···", fill=P["fg_faint"])
         self.itemconfigure(self._reset, text="")
+
+    def _set_mascot(self, frame: int) -> None:
+        self._mascot = render_mascot(2, bg=P["bg"], frame=frame)
+        self.itemconfigure(self._mascot_id, image=self._mascot)
+        # Sobe um pixel no quadro em que um pe esta no ar: sem isso a caminhada
+        # fica so nos pes, e de longe nem se nota.
+        salto = -1 if frame % 2 else 0
+        self.coords(self._mascot_id, self.size / 2, self._mascot_y + salto)
 
     def set(self, pct: float | None, reset_text: str = "") -> None:
         color = P["ok"] if pct is None else level_color(pct)
         self._image = render_ring(self.size, pct, color)
         self.itemconfigure(self._image_id, image=self._image)
+        self._set_mascot(0)
         if pct is None:
             self.itemconfigure(self._value, text="--", fill=P["fg_faint"])
         else:
@@ -568,18 +586,24 @@ class UsageWidget(tk.Tk):
         """
         if not self._cli_busy:
             self.refresh_btn.configure(text="↻", fg=P["fg_dim"])
+            if self.mode != "mini":
+                self.dot.set_frame(0)
             self._refresh_now()
             return
 
         self._spin_frame += 1
         phase = (self._spin_frame % 40) / 40
+        # Um passo a cada dois quadros: na cadencia do spinner o mascote
+        # pareceria correr.
+        passo = self._spin_frame // 2
         self.refresh_btn.configure(
             text=SPINNER[self._spin_frame % len(SPINNER)], fg=P["accent"]
         )
 
         if self.mode == "mini":
-            self.ring.set_loading(phase)
+            self.ring.set_loading(phase, passo)
         else:
+            self.dot.set_frame(passo)
             self.session_meter.set_loading(phase)
             self.week_meter.set_loading((phase + 0.5) % 1.0)
             self._render_footer()

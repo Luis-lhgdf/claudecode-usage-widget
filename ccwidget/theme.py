@@ -122,26 +122,53 @@ MASCOT = (
 MASCOT_W = len(MASCOT[0])
 MASCOT_H = len(MASCOT)
 
+# Passos da caminhada: a ultima linha guarda as duas pontas das pernas, e
+# recolher uma de cada vez da a impressao de passo. Os quadros pares deixam as
+# duas no chao, para o movimento ter um ponto de apoio entre as passadas.
+MASCOT_STEPS = 4
+
+
+def mascot_frame(frame: int) -> tuple[str, ...]:
+    """Variacao do mascote para o quadro pedido da caminhada."""
+    fase = frame % MASCOT_STEPS
+    if fase == 0 or fase == 2:
+        return MASCOT
+    linhas = list(MASCOT)
+    ultima = linhas[-1]
+    if fase == 1:  # pe direito no ar
+        linhas[-1] = "".join(
+            ch if i < len(ultima) // 2 else "." for i, ch in enumerate(ultima)
+        )
+    else:          # pe esquerdo no ar
+        linhas[-1] = "".join(
+            ch if i > len(ultima) // 2 else "." for i, ch in enumerate(ultima)
+        )
+    return tuple(linhas)
+
+
 _MASCOT_CACHE: dict[tuple, tk.PhotoImage] = {}
 
 
 def render_mascot(
-    scale: int = 1, color: str | None = None, bg: str | None = None
+    scale: int = 1,
+    color: str | None = None,
+    bg: str | None = None,
+    frame: int = 0,
 ) -> tk.PhotoImage:
     """Devolve o mascote como imagem, ampliado por um fator inteiro.
 
-    O resultado fica em cache por (escala, cor, fundo): montar a imagem custa
-    mais do que exibi-la, e o widget a redesenha a cada atualizacao.
+    O resultado fica em cache por (escala, cor, fundo, quadro): montar a imagem
+    custa mais do que exibi-la, e a animacao repete os mesmos quadros.
     """
     color = color or P["accent"]
     bg = bg or P["bg_soft"]
-    key = (scale, color, bg)
+    key = (scale, color, bg, frame % MASCOT_STEPS)
     cached = _MASCOT_CACHE.get(key)
     if cached is not None:
         return cached
 
     rows = []
-    for line in MASCOT:
+    for line in mascot_frame(frame):
         pixels = [color if ch == "#" else bg for ch in line]
         row = "{" + " ".join(p for p in pixels for _ in range(scale)) + "}"
         rows.extend([row] * scale)
