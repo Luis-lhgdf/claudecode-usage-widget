@@ -50,13 +50,11 @@ O widget roda esse comando, interpreta a saída (percentuais, horários de reset
 
 **O widget não estima consumo por conta própria.** Se ainda não houve consulta, ele mostra `--` e diz isso, em vez de exibir um número inventado.
 
-O selo no cabeçalho indica o estado:
+O rodapé diz há quanto tempo o número foi lido e quando será a próxima consulta — e fica âmbar se a leitura passou de 20 minutos:
 
-| Selo | Significado |
-|---|---|
-| `oficial` | Consulta recente — os mesmos números do `/usage` |
-| `antigo` | Passou mais de 20 minutos desde a última consulta |
-| `sem dado` | Nenhuma consulta ainda |
+```
+Atualizado há 4 min · próxima em 6 min
+```
 
 ## Instalação
 
@@ -119,7 +117,7 @@ Depois remova a pasta `~/.ccwidget/`.
 
 ## English
 
-A floating desktop widget for Claude Code limits: the 5-hour session window and the weekly limit, always on top, as a minimized ring or a full panel, with light and dark themes.
+A floating desktop widget for Claude Code limits: the 5-hour session window and the weekly limit, always on top, in three modes — a minimized ring, a drawer docked to the right edge that slides out on click, or a free-floating panel — with light and dark themes.
 
 Numbers come from a single official source — the widget runs `claude -p "/usage"` and parses its output. That's a local command with no model response, so it costs no tokens; it runs on a configurable interval (10 minutes by default) and on demand from the menu. The widget never estimates consumption on its own: with no data yet, it says so instead of showing an invented figure.
 
