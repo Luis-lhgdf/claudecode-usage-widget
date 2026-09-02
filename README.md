@@ -8,7 +8,12 @@
 
 <img src="docs/painel-escuro.png" width="270" alt="Painel do widget">
 
-Windows · Python 3.10+ · sem dependências · não-oficial
+![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-4d7a3a)
+![Python](https://img.shields.io/badge/python-3.10%2B-d97757)
+![Plataforma](https://img.shields.io/badge/plataforma-Windows-6d6659)
+![Dependências](https://img.shields.io/badge/depend%C3%AAncias-nenhuma-4d7a3a)
+
+Projeto não-oficial
 
 </div>
 
@@ -26,14 +31,14 @@ Windows · Python 3.10+ · sem dependências · não-oficial
 git clone https://github.com/Luis-lhgdf/claudecode-usage-widget.git
 cd claudecode-usage-widget
 
-pythonw run_widget.pyw           # abre o widget
-.\scripts\install-startup.ps1    # opcional: abre junto com o Windows
+.\scripts\install.ps1     # cria os atalhos
+pythonw run_widget.pyw    # abre agora
 ```
 
 | Arquivo | Para que serve |
 |---|---|
 | `run_widget.pyw` | **Abre o widget.** É o que você executa para usar. A extensão `.pyw` faz o Windows usar `pythonw.exe`, sem janela de console |
-| `scripts/install-startup.ps1` | **Roda uma única vez.** Cria um atalho para o `run_widget.pyw` na pasta Inicializar, para o widget subir sozinho no login. `-Remove` desfaz |
+| `scripts/install.ps1` | **Roda uma vez.** Cria dois atalhos para o `run_widget.pyw` — um na pasta Inicializar, para subir com o Windows, outro na área de trabalho. Mostra os caminhos no fim e `-Remove` desfaz |
 
 ## Modos
 
@@ -95,13 +100,13 @@ ccwidget/
   config.py      preferências
   __main__.py    entrada (widget / usage / report)
 run_widget.pyw   abre sem console
-scripts/         instalador de inicialização
+scripts/         instalador dos atalhos
 ```
 
 ## Desinstalar
 
 ```powershell
-.\scripts\install-startup.ps1 -Remove
+.\scripts\install.ps1 -Remove
 ```
 
 Depois remova `~/.ccwidget/`.
@@ -125,6 +130,6 @@ python -m ccwidget report
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE).
+MIT — veja [LICENSE](LICENSE). Histórico em [CHANGELOG.md](CHANGELOG.md).
 
 Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC; o mascote é desenhado em código (`ccwidget/theme.py`), nenhum arquivo de marca acompanha o repositório. O projeto apenas executa um comando público do CLI e lê o resultado.
