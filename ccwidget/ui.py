@@ -30,6 +30,7 @@ from .theme import (
     P,
     level_color,
     render_bar,
+    render_bar_loading,
     render_mascot,
     render_ring,
     set_theme,
@@ -37,9 +38,13 @@ from .theme import (
 
 PAD = 14
 WIDTH = 268
-RING_SIZE = 64
+RING_SIZE = 88
 
 MODES = ("mini", "panel")
+# Quadros do spinner: o tkinter nao rotaciona texto, entao a rotacao vem de
+# uma sequencia de glifos.
+SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+SPIN_MS = 70
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
 
@@ -93,19 +98,27 @@ class Ring(tk.Canvas):
         self._image = render_ring(size, None, P["ok"])
         self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
 
-        # Alturas em fracao do diametro. O percentual e a hora ficam separados
-        # por 31% -- os 19% que davam o espacamento minimo mais 12% de folga,
-        # para a hora nao encostar no numero grande.
-        self._mascot = render_mascot(1, bg=P["bg"])
-        self.create_image(size / 2, size * 0.24, image=self._mascot, anchor="center")
+        # Alturas em fracao do diametro, com folga nas duas pontas: o mascote
+        # nao encosta no anel e a hora nao encosta na base.
+        self._mascot = render_mascot(2, bg=P["bg"])
+        self.create_image(size / 2, size * 0.30, image=self._mascot, anchor="center")
         self._value = self.create_text(
-            size / 2, size * 0.47, text="--", fill=P["fg"],
-            font=("Segoe UI", 12, "bold"),
+            size / 2, size * 0.555, text="--", fill=P["fg"],
+            font=("Segoe UI", 14, "bold"),
         )
         self._reset = self.create_text(
-            size / 2, size * 0.78, text="", fill=P["fg_faint"],
-            font=("Segoe UI", 7),
+            size / 2, size * 0.765, text="", fill=P["fg_faint"],
+            font=("Segoe UI", 8),
         )
+
+    def set_loading(self, phase: float) -> None:
+        """Um quarto de anel girando, no lugar do arco de progresso."""
+        self._image = render_ring(
+            self.size, 25, P["accent"], start=phase % 1.0
+        )
+        self.itemconfigure(self._image_id, image=self._image)
+        self.itemconfigure(self._value, text="···", fill=P["fg_faint"])
+        self.itemconfigure(self._reset, text="")
 
     def set(self, pct: float | None, reset_text: str = "") -> None:
         color = P["ok"] if pct is None else level_color(pct)
@@ -139,6 +152,13 @@ class Bar(tk.Canvas):
         )
         self.itemconfigure(self._image_id, image=self._image)
 
+    def set_loading(self, phase: float) -> None:
+        """Segmento correndo na pista, enquanto o valor novo nao chega."""
+        self._image = render_bar_loading(
+            self.WIDTH, self.HEIGHT, phase, P["accent"]
+        )
+        self.itemconfigure(self._image_id, image=self._image)
+
 
 class Meter(tk.Frame):
     """Titulo + percentual + barra + legenda: o bloco de uma janela de limite."""
@@ -169,6 +189,10 @@ class Meter(tk.Frame):
         )
         self.caption.pack(fill="x")
 
+    def set_loading(self, phase: float) -> None:
+        self.value.configure(text="···", fg=P["fg_faint"])
+        self.bar.set_loading(phase)
+
     def update_values(self, pct: float | None, caption: str) -> None:
         if pct is None:
             self.value.configure(text="--", fg=P["fg_faint"])
@@ -194,6 +218,7 @@ class UsageWidget(tk.Tk):
         self._cli_busy = False
         self._cli_error: str | None = None
         self._next_usage_at: float | None = None
+        self._spin_frame = 0
 
         self._setup_window()
         self._build()
@@ -526,8 +551,41 @@ class UsageWidget(tk.Tk):
             return
         self._cli_busy = True
         self._cli_error = None
-        self._render_footer()
+        self._spin_frame = 0
+        self._animate_loading()
         threading.Thread(target=self._usage_cli_worker, daemon=True).start()
+
+    def _animate_loading(self) -> None:
+        """Enquanto o /usage responde: seta girando e barras indeterminadas.
+
+        A consulta leva alguns segundos, e sem sinal de atividade o clique no
+        botao parece nao ter feito nada. Os valores antigos saem de cena porque
+        deixaram de valer no instante em que a consulta comecou.
+
+        Este laco tambem e quem encerra o carregamento. A thread de trabalho
+        apenas baixa `_cli_busy`: tkinter nao e seguro para uso concorrente, e
+        agendar a volta de la deixava a interface presa no estado de carregando
+        quando o callback se perdia.
+        """
+        if not self._cli_busy:
+            self.refresh_btn.configure(text="↻", fg=P["fg_dim"])
+            self._refresh_now()
+            return
+
+        self._spin_frame += 1
+        phase = (self._spin_frame % 40) / 40
+        self.refresh_btn.configure(
+            text=SPINNER[self._spin_frame % len(SPINNER)], fg=P["accent"]
+        )
+
+        if self.mode == "mini":
+            self.ring.set_loading(phase)
+        else:
+            self.session_meter.set_loading(phase)
+            self.week_meter.set_loading((phase + 0.5) % 1.0)
+            self._render_footer()
+
+        self.after(SPIN_MS, self._animate_loading)
 
     def _usage_cli_worker(self) -> None:
         from .usage_cli import refresh_state
@@ -537,14 +595,13 @@ class UsageWidget(tk.Tk):
         except Exception as exc:
             self._cli_error = str(exc)
         finally:
+            # So isto: quem redesenha e `_animate_loading`, na thread da
+            # interface. Nada de tocar em widgets a partir daqui.
             self._cli_busy = False
-        try:
-            self.after(0, self._refresh_now)
-        except RuntimeError:
-            pass  # janela ja fechada
 
     def _refresh_now(self) -> None:
         self.live = read_state()
+        self.refresh_btn.configure(text="↻", fg=P["fg_dim"])
         self._render()
 
     def _render(self) -> None:
@@ -598,11 +655,8 @@ class UsageWidget(tk.Tk):
         idade do numero -- e isso e melhor dito com o tempo do que com rotulo.
         """
         if self._cli_busy:
-            self.refresh_btn.configure(fg=P["accent"])
             self.footer.configure(text="consultando /usage…", fg=P["fg_dim"])
             return
-
-        self.refresh_btn.configure(fg=P["fg_dim"])
 
         if self._cli_error:
             self.footer.configure(text=f"falhou: {self._cli_error}", fg=P["crit"])

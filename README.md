@@ -24,7 +24,7 @@ Alterne pelo menu da engrenagem `⚙`.
 
 <table>
 <tr>
-<td align="center" width="35%"><img src="docs/minimizado.png" width="64" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o mascote,<br>o percentual e o tempo que falta<br>para o reset. Um clique abre o painel</sub></td>
+<td align="center" width="35%"><img src="docs/minimizado.png" width="88" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o mascote,<br>o percentual e o tempo que falta<br>para o reset. Um clique abre o painel</sub></td>
 <td align="center" width="65%"><img src="docs/painel-escuro.png" width="230" alt="Painel"><br><b>Painel</b><br><sub>Sessão atual e limite semanal,<br>livre na tela</sub></td>
 </tr>
 </table>
@@ -48,6 +48,12 @@ claude -p "/usage"
 O widget roda esse comando, interpreta a saída (percentuais, horários de reset e fuso) e guarda o resultado em `~/.ccwidget/state.json`. É um comando local — não há resposta de modelo, então **não consome tokens**. Como leva alguns segundos para o CLI iniciar, a consulta acontece em intervalo configurável (10 minutos por padrão) e sob demanda pelo menu, nunca no laço da interface.
 
 **O widget não estima consumo por conta própria.** Se ainda não houve consulta, ele mostra `--` e diz isso, em vez de exibir um número inventado.
+
+Enquanto a consulta acontece — são alguns segundos — a seta gira e as barras passam a um segmento correndo na pista. Os valores antigos saem de cena porque deixaram de valer no instante em que a consulta começou:
+
+<div align="center">
+<img src="docs/carregando.png" width="270" alt="Widget durante a consulta ao /usage">
+</div>
 
 O rodapé diz há quanto tempo o número foi lido e quando será a próxima consulta — e fica âmbar se a leitura passou de 20 minutos:
 

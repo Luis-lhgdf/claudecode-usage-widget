@@ -178,6 +178,7 @@ def render_ring(
     arc_color: str,
     outside: str = CHROMA,
     samples: int = 4,
+    start: float = 0.0,
 ) -> tk.PhotoImage:
     """Disco com anel de progresso, suavizado.
 
@@ -187,7 +188,10 @@ def render_ring(
     fundo -- todos internos -- sao misturados normalmente.
     """
     pct = -1.0 if pct is None else min(max(pct, 0.0), 100.0)
-    key = ("ring", size, round(pct), arc_color, P["bg"], P["border"], P["ring_track"])
+    key = (
+        "ring", size, round(pct), round(start, 3), arc_color,
+        P["bg"], P["border"], P["ring_track"],
+    )
     cached = _SHAPE_CACHE.get(key)
     if cached is not None:
         return cached
@@ -229,7 +233,10 @@ def render_ring(
                         t = ((math.atan2(dy, dx) + math.pi / 2) % (2 * math.pi)) / (
                             2 * math.pi
                         )
-                        cor = arc if 0 <= t <= limite else track
+                        # O arco corre de `start` por `limite` de volta, o que
+                        # permite gira-lo durante o carregamento.
+                        rel = (t - start) % 1.0
+                        cor = arc if 0 <= rel <= limite else track
                     else:
                         cor = bg
                     acc[0] += cor[0]
@@ -304,6 +311,77 @@ def render_bar(
             cor = _blend(track, bg, n_track / total)
             if n_fill:
                 cor = _blend(fill, _hex_to_rgb(cor), n_fill / n_track)
+            row.append(cor)
+        rows.append("{" + " ".join(row) + "}")
+
+    image = tk.PhotoImage(width=width, height=height)
+    image.put(" ".join(rows))
+    _SHAPE_CACHE[key] = image
+    return image
+
+
+def render_bar_loading(
+    width: int, height: int, phase: float, color: str, samples: int = 3
+) -> tk.PhotoImage:
+    """Barra indeterminada: um segmento que percorre a pista.
+
+    Usada enquanto o `/usage` responde -- o valor antigo ja nao vale, e o novo
+    ainda nao chegou, entao nao ha percentual honesto para mostrar.
+
+    A fase e quantizada antes de virar chave de cache: sao poucas imagens
+    reaproveitadas em todo ciclo da animacao.
+    """
+    import math
+
+    phase = phase % 1.0
+    key = ("barload", width, height, round(phase, 2), color, P["bg"], P["track"])
+    cached = _SHAPE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    raio = height / 2
+    seg = width * 0.3
+    # O segmento entra pela esquerda e sai pela direita.
+    x0 = -seg + (width + seg) * phase
+    x1 = x0 + seg
+
+    bg = _hex_to_rgb(P["bg"])
+    track = _hex_to_rgb(P["track"])
+    fill = _hex_to_rgb(color)
+    step = 1.0 / samples
+    total = samples * samples
+
+    def na_pista(x: float, y: float) -> bool:
+        if x < raio:
+            return math.hypot(x - raio, y - raio) <= raio
+        if x > width - raio:
+            return math.hypot(x - (width - raio), y - raio) <= raio
+        return 0 <= x <= width
+
+    rows = []
+    for py in range(height):
+        row = []
+        for px in range(width):
+            n_track = n_seg = 0
+            for sy in range(samples):
+                y = py + (sy + 0.5) * step
+                for sx in range(samples):
+                    x = px + (sx + 0.5) * step
+                    if not na_pista(x, y):
+                        continue
+                    n_track += 1
+                    if x0 <= x <= x1:
+                        n_seg += 1
+            if not n_track:
+                row.append(P["bg"])
+                continue
+            cor = _blend(track, bg, n_track / total)
+            if n_seg:
+                # Desvanece nas pontas do segmento, para o movimento nao piscar.
+                centro = (x0 + x1) / 2
+                dist = abs(px + 0.5 - centro) / (seg / 2)
+                alpha = max(0.0, 1.0 - dist ** 2) * (n_seg / n_track)
+                cor = _blend(fill, _hex_to_rgb(cor), alpha)
             row.append(cor)
         rows.append("{" + " ".join(row) + "}")
 
