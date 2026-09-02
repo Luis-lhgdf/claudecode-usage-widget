@@ -35,8 +35,6 @@ class Config:
     mode: str = "summary"
     # theme: "dark", "light" ou "auto" (segue a preferencia do Windows).
     theme: str = "auto"
-    # Altura em que a gaveta fica encostada na borda direita.
-    drawer_y: int = 220
     pos_x: int = 40
     pos_y: int = 40
     opacity: float = 0.96

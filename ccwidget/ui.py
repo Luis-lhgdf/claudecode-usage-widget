@@ -3,11 +3,9 @@
 Janela sem bordas, sempre acima das outras, arrastavel para qualquer canto da
 tela, montada com tkinter (biblioteca padrao -- nao ha nada para instalar).
 
-Tres modos, alternados pelo menu da engrenagem:
+Dois modos, alternados pelo menu da engrenagem:
 
 * **mini**   -- so um circulo flutuante com o mascote e o anel da sessao.
-* **gaveta** -- encostado na borda direita da tela, mostrando so uma abinha;
-  um clique nela desliza o painel para dentro da tela.
 * **painel** -- sessao de 5 horas e limite semanal, livre na tela.
 
 Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`. A consulta
@@ -31,7 +29,9 @@ from .theme import (
     MASCOT_W,
     P,
     level_color,
+    render_bar,
     render_mascot,
+    render_ring,
     set_theme,
 )
 
@@ -39,12 +39,18 @@ PAD = 14
 WIDTH = 268
 RING_SIZE = 64
 
-MODES = ("mini", "drawer", "panel")
+MODES = ("mini", "panel")
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
-DRAWER_TAB = 20      # largura da abinha que fica visivel na borda da tela
-DRAWER_STEPS = 12    # quadros da animacao de abrir e fechar
-DRAWER_FRAME_MS = 12
+
+
+def fmt_duration_short(seconds: int) -> str:
+    """Tempo ate o reset no circulo, onde cabem poucos caracteres: '3h18', '45m'."""
+    if seconds <= 0:
+        return "agora"
+    minutes = seconds // 60
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}" if hours else f"{minutes}m"
 
 
 def fmt_duration(seconds: int) -> str:
@@ -73,82 +79,62 @@ class Mascot(tk.Canvas):
 
 
 class Ring(tk.Canvas):
-    """Circulo do modo mini: mascote, percentual e anel de progresso."""
+    """Circulo do modo mini: mascote, percentual e tempo ate o reset.
+
+    O disco e o anel sao rasterizados com antialiasing (`render_ring`), porque
+    `create_oval` e `create_arc` do tkinter saem serrilhados.
+    """
 
     def __init__(self, parent, size: int = RING_SIZE) -> None:
         super().__init__(
             parent, width=size, height=size, bg=CHROMA, highlightthickness=0, bd=0
         )
-        pad = 4
-        box = (pad, pad, size - pad, size - pad)
+        self.size = size
+        self._image = render_ring(size, None, P["ok"])
+        self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
 
-        # Disco de fundo, para o conteudo ter contraste sobre qualquer janela.
-        self.create_oval(1, 1, size - 1, size - 1, fill=P["bg"], outline=P["border"])
-        self.create_arc(
-            *box, start=90, extent=-359.9, style="arc", width=4,
-            outline=P["ring_track"],
-        )
-        self._arc = self.create_arc(
-            *box, start=90, extent=0, style="arc", width=4, outline=P["ok"]
-        )
         self._mascot = render_mascot(1, bg=P["bg"])
-        self.create_image(size / 2, size * 0.34, image=self._mascot, anchor="center")
+        self.create_image(size / 2, size * 0.30, image=self._mascot, anchor="center")
         self._value = self.create_text(
-            size / 2, size * 0.63, text="--", fill=P["fg"],
-            font=("Segoe UI", 11, "bold"),
+            size / 2, size * 0.545, text="--", fill=P["fg"],
+            font=("Segoe UI", 12, "bold"),
         )
-        self.create_text(
-            size / 2, size * 0.80, text="5h", fill=P["fg_faint"],
-            font=("Segoe UI", 6),
+        self._reset = self.create_text(
+            size / 2, size * 0.735, text="", fill=P["fg_faint"],
+            font=("Segoe UI", 7),
         )
 
-    def set(self, pct: float | None) -> None:
+    def set(self, pct: float | None, reset_text: str = "") -> None:
+        color = P["ok"] if pct is None else level_color(pct)
+        self._image = render_ring(self.size, pct, color)
+        self.itemconfigure(self._image_id, image=self._image)
         if pct is None:
-            self.itemconfigure(self._arc, extent=0)
             self.itemconfigure(self._value, text="--", fill=P["fg_faint"])
-            return
-        pct = min(max(pct, 0.0), 100.0)
-        color = level_color(pct)
-        # -0.1 evita o arco cheio virar circulo fechado sem inicio visivel.
-        self.itemconfigure(self._arc, extent=-(pct * 3.599 or 0.1), outline=color)
-        self.itemconfigure(self._value, text=f"{pct:.0f}%", fill=color)
+        else:
+            self.itemconfigure(self._value, text=f"{pct:.0f}%", fill=color)
+        self.itemconfigure(self._reset, text=reset_text)
 
 
 class Bar(tk.Canvas):
-    """Barra de progresso fina, redesenhada quando a largura muda."""
+    """Barra de progresso em capsula, com pontas suavizadas."""
 
-    HEIGHT = 6
+    HEIGHT = 7
+    WIDTH = WIDTH - PAD * 2
 
     def __init__(self, parent) -> None:
-        # A largura inicial importa: sem ela o Canvas assume o padrao do tkinter
-        # (378px) e estica o painel inteiro. O <Configure> cuida do resto.
         super().__init__(
-            parent, height=self.HEIGHT, width=WIDTH - PAD * 2,
+            parent, height=self.HEIGHT, width=self.WIDTH,
             bg=P["bg"], highlightthickness=0, bd=0,
         )
-        self._pct = 0.0
-        self._color = P["ok"]
-        self._track = self.create_rectangle(
-            0, 0, 0, self.HEIGHT, fill=P["track"], outline=""
-        )
-        self._fill = self.create_rectangle(
-            0, 0, 0, self.HEIGHT, fill=P["ok"], outline=""
-        )
-        self.bind("<Configure>", lambda _e: self._draw())
-
-    def _draw(self) -> None:
-        width = max(self.winfo_width(), 1)
-        self.coords(self._track, 0, 0, width, self.HEIGHT)
-        filled = int(width * self._pct / 100)
-        if self._pct > 0:
-            filled = max(filled, 2)
-        self.coords(self._fill, 0, 0, filled, self.HEIGHT)
-        self.itemconfigure(self._fill, fill=self._color)
+        self._image = render_bar(self.WIDTH, self.HEIGHT, 0, P["ok"])
+        self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
 
     def set(self, pct: float, color: str | None = None) -> None:
-        self._pct = min(max(pct, 0.0), 100.0)
-        self._color = color or level_color(self._pct)
-        self._draw()
+        pct = min(max(pct, 0.0), 100.0)
+        self._image = render_bar(
+            self.WIDTH, self.HEIGHT, pct, color or level_color(pct)
+        )
+        self.itemconfigure(self._image_id, image=self._image)
 
 
 class Meter(tk.Frame):
@@ -201,10 +187,10 @@ class UsageWidget(tk.Tk):
         self.mode = self.cfg.mode if self.cfg.mode in MODES else "panel"
         self._drag = (0, 0)
         self._session_pct: float | None = None
+        self._session_reset = ""
         self._cli_busy = False
         self._cli_error: str | None = None
         self._next_usage_at: float | None = None
-        self._drawer_open = False
 
         self._setup_window()
         self._build()
@@ -232,38 +218,7 @@ class UsageWidget(tk.Tk):
         self.container.pack(fill="both", expand=True)
         self._build_ring()
         self._build_panel()
-        self._build_tab()
         self._build_menu()
-
-    def _build_tab(self) -> None:
-        """A abinha do modo gaveta: a alca que fica visivel na borda da tela."""
-        # Borda propria: encostada no painel, a aba precisa de um contorno para
-        # nao virar uma extensao dele, e de contorno tambem quando esta sozinha
-        # na borda da tela, sobre qualquer janela por baixo.
-        self.tab = tk.Frame(self.container, bg=P["border"], width=DRAWER_TAB)
-        self.tab.pack_propagate(False)
-
-        face = tk.Frame(self.tab, bg=P["bg_soft"])
-        face.pack(fill="both", expand=True, padx=(1, 0), pady=1)
-
-        inner = tk.Frame(face, bg=P["bg_soft"])
-        inner.place(relx=0.5, rely=0.5, anchor="center")
-
-        self.tab_mascot = Mascot(inner, scale=1)
-        self.tab_mascot.pack(pady=(0, 6))
-        # A seta aponta para onde a gaveta vai: para dentro quando fechada,
-        # para a borda quando aberta.
-        self.tab_arrow = tk.Label(
-            inner, text="‹", bg=P["bg_soft"], fg=P["fg_dim"], font=("Segoe UI", 12)
-        )
-        self.tab_arrow.pack()
-
-        for widget in (self.tab, face, inner, self.tab_mascot, self.tab_arrow):
-            widget.configure(cursor="hand2")
-            widget.bind("<Button-1>", self._tab_press)
-            widget.bind("<B1-Motion>", self._tab_drag)
-            widget.bind("<ButtonRelease-1>", self._tab_release)
-            widget.bind("<Button-3>", self._show_menu)
 
     def _build_ring(self) -> None:
         self.ring_holder = tk.Frame(self.container, bg=CHROMA)
@@ -368,9 +323,7 @@ class UsageWidget(tk.Tk):
         self.var_top = tk.BooleanVar(value=self.cfg.always_on_top)
         self.var_interval = tk.IntVar(value=self.cfg.usage_refresh_minutes)
 
-        for label, value in (
-            ("Minimizado", "mini"), ("Gaveta", "drawer"), ("Painel", "panel")
-        ):
+        for label, value in (("Minimizado", "mini"), ("Painel", "panel")):
             self.menu.add_radiobutton(
                 label=label, value=value, variable=self.var_mode,
                 command=lambda v=value: self._apply_mode(v),
@@ -427,13 +380,11 @@ class UsageWidget(tk.Tk):
     def _apply_mode(self, mode: str, save: bool = True) -> None:
         if mode not in MODES:
             mode = "panel"
-        anterior = self.mode
         self.mode = mode
         self.var_mode.set(mode)
 
         self.ring_holder.pack_forget()
         self.panel.pack_forget()
-        self.tab.pack_forget()
         self.footer.pack_forget()
 
         if mode == "mini":
@@ -441,81 +392,14 @@ class UsageWidget(tk.Tk):
             self.ring_holder.pack()
         else:
             self.container.configure(bg=P["bg"])
+            self.panel.pack(fill="both", expand=True)
             self.footer.pack(fill="x", padx=PAD, pady=(10, 8))
-            if mode == "drawer":
-                # A aba vai na direita, colada na borda da tela; o painel
-                # desliza para dentro e para fora atras dela.
-                self.tab.pack(side="right", fill="y")
-                self.panel.pack(side="left", fill="both", expand=True)
-            else:
-                self.panel.pack(fill="both", expand=True)
 
         self._resize()
-
-        if mode == "drawer":
-            self._drawer_open = False
-            self._snap_drawer(animate=False)
-        elif anterior == "drawer":
-            # Sai da borda e volta para a posicao livre guardada.
-            self.geometry(f"+{self.cfg.pos_x}+{self.cfg.pos_y}")
-
         if save:
             self.cfg.mode = mode
             self.cfg.save()
         self._render()
-
-    # ------------------------------------------------------------------ gaveta
-
-    def _drawer_x(self, aberto: bool) -> int:
-        """X da janela com a gaveta aberta ou fechada.
-
-        Fechada, so a abinha fica dentro da tela: o resto da janela fica para
-        fora, o que o Windows permite e e justamente o efeito de gaveta.
-        """
-        largura = self.winfo_width() or (WIDTH + DRAWER_TAB + 2)
-        tela = self.winfo_screenwidth()
-        return tela - largura if aberto else tela - DRAWER_TAB
-
-    def _snap_drawer(self, animate: bool = True) -> None:
-        alvo = self._drawer_x(self._drawer_open)
-        self.tab_arrow.configure(text="›" if self._drawer_open else "‹")
-        if animate:
-            self._slide_to(alvo)
-        else:
-            self.geometry(f"+{alvo}+{self.cfg.drawer_y}")
-
-    def _slide_to(self, alvo: int, passo: int = 0) -> None:
-        """Anima o deslize com desaceleracao no fim."""
-        if passo >= DRAWER_STEPS:
-            self.geometry(f"+{alvo}+{self.winfo_y()}")
-            return
-        inicio = self.winfo_x()
-        # ease-out: avanca mais no comeco e chega devagar
-        fracao = 1 - (1 - (passo + 1) / DRAWER_STEPS) ** 3
-        atual = int(inicio + (alvo - inicio) * fracao / max(1 - fracao + 0.0001, 0.35))
-        self.geometry(f"+{min(max(atual, min(inicio, alvo)), max(inicio, alvo))}+{self.winfo_y()}")
-        self.after(DRAWER_FRAME_MS, lambda: self._slide_to(alvo, passo + 1))
-
-    def _toggle_drawer(self) -> None:
-        self._drawer_open = not self._drawer_open
-        self._snap_drawer()
-
-    def _tab_press(self, event) -> None:
-        self._drag_start(event)
-        self._drag_origin = (event.x_root, event.y_root)
-
-    def _tab_drag(self, event) -> None:
-        """Na gaveta so o movimento vertical faz sentido: o X fica na borda."""
-        y = event.y_root - self._drag[1]
-        self.geometry(f"+{self.winfo_x()}+{y}")
-
-    def _tab_release(self, event) -> None:
-        origin = getattr(self, "_drag_origin", (event.x_root, event.y_root))
-        moved = abs(event.x_root - origin[0]) + abs(event.y_root - origin[1])
-        self.cfg.drawer_y = self.winfo_y()
-        self.cfg.save()
-        if moved < 5:
-            self._toggle_drawer()
 
     def _apply_theme(self, name: str) -> None:
         """Troca a paleta reconstruindo a interface.
@@ -664,7 +548,7 @@ class UsageWidget(tk.Tk):
         self._render_session()
         self._render_week()
         if self.mode == "mini":
-            self.ring.set(self._session_pct)
+            self.ring.set(self._session_pct, self._session_reset)
         else:
             self._render_footer()
 
@@ -675,10 +559,13 @@ class UsageWidget(tk.Tk):
 
         if window is None:
             self._session_pct = None
+            self._session_reset = ""
             self.session_meter.update_values(None, "Sem dado · menu › Atualizar agora")
             return
 
         self._session_pct = window.used_percentage
+        # No circulo cabe pouco: so o tempo que falta, sem a palavra "reinicia".
+        self._session_reset = fmt_duration_short(window.remaining_seconds())
         caption = f"Reinicia em {fmt_duration(window.remaining_seconds())}"
         if window.resets_at:
             clock = datetime.fromtimestamp(window.resets_at, tz=self.tz)

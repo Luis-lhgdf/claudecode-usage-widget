@@ -18,15 +18,14 @@ Celular tem widget para tudo. Computador, quase nada. E o número que importa en
 
 Isso põe o número na tela, permanentemente.
 
-## Três modos
+## Dois modos
 
 Alterne pelo menu da engrenagem `⚙`.
 
 <table>
 <tr>
-<td align="center" width="25%"><img src="docs/minimizado.png" width="64" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o<br>mascote e o anel da sessão.<br>Um clique abre o painel</sub></td>
-<td align="center" width="40%"><img src="docs/gaveta.png" width="220" alt="Modo gaveta"><br><b>Gaveta</b><br><sub>Encostado na borda direita,<br>só a abinha aparece.<br>Um clique nela desliza o painel</sub></td>
-<td align="center" width="35%"><img src="docs/painel-escuro.png" width="200" alt="Painel"><br><b>Painel</b><br><sub>Livre na tela,<br>arraste para onde quiser</sub></td>
+<td align="center" width="35%"><img src="docs/minimizado.png" width="64" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o mascote,<br>o percentual e o tempo que falta<br>para o reset. Um clique abre o painel</sub></td>
+<td align="center" width="65%"><img src="docs/painel-escuro.png" width="230" alt="Painel"><br><b>Painel</b><br><sub>Sessão atual e limite semanal,<br>livre na tela</sub></td>
 </tr>
 </table>
 
@@ -79,8 +78,6 @@ Requer o CLI do Claude Code no `PATH` (o widget o executa) e Python 3.10 ou mais
 | `✕` ou `Esc` | Fecha |
 | Arrastar o cabeçalho ou o círculo | Move o widget |
 | Clicar no círculo | Abre o painel |
-| Clicar na aba da gaveta | Desliza o painel para dentro ou para fora |
-| Arrastar a aba da gaveta | Sobe ou desce a gaveta na borda |
 
 Sem janela, direto no terminal:
 
@@ -97,7 +94,7 @@ O intervalo entre consultas automáticas sai do menu **Atualizar a cada** (5, 10
 ccwidget/
   usage_cli.py   roda o `claude -p /usage` e interpreta a saída
   state.py       lê e escreve o último resultado conhecido
-  theme.py       paletas clara/escura e o mascote em pixel art
+  theme.py       paletas, o mascote e as formas com antialiasing
   ui.py          o widget tkinter
   config.py      preferências persistentes
   __main__.py    entrada (widget / usage / report)
@@ -117,7 +114,7 @@ Depois remova a pasta `~/.ccwidget/`.
 
 ## English
 
-A floating desktop widget for Claude Code limits: the 5-hour session window and the weekly limit, always on top, in three modes — a minimized ring, a drawer docked to the right edge that slides out on click, or a free-floating panel — with light and dark themes.
+A floating desktop widget for Claude Code limits: the 5-hour session window and the weekly limit, always on top, in two modes — a minimized ring showing the percentage and time to reset, or a free-floating panel — with light and dark themes.
 
 Numbers come from a single official source — the widget runs `claude -p "/usage"` and parses its output. That's a local command with no model response, so it costs no tokens; it runs on a configurable interval (10 minutes by default) and on demand from the menu. The widget never estimates consumption on its own: with no data yet, it says so instead of showing an invented figure.
 

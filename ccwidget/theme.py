@@ -146,3 +146,168 @@ def render_mascot(
     image.put(" ".join(rows))
     _MASCOT_CACHE[key] = image
     return image
+
+
+# ------------------------------------------------- formas com antialiasing
+
+# O Canvas do tkinter nao suaviza bordas: `create_oval` e `create_arc` saem
+# serrilhados, e e isso que da o aspecto pixelado do circulo. As funcoes abaixo
+# rasterizam as formas amostrando cada pixel numa grade `samples x samples`,
+# como o CustomTkinter faz por outro caminho (glifos de uma fonte de formas),
+# mas sem depender de biblioteca externa.
+
+_SHAPE_CACHE: dict[tuple, tk.PhotoImage] = {}
+
+
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    value = value.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def _blend(fg: tuple[int, int, int], bg: tuple[int, int, int], a: float) -> str:
+    return "#%02x%02x%02x" % (
+        round(bg[0] + (fg[0] - bg[0]) * a),
+        round(bg[1] + (fg[1] - bg[1]) * a),
+        round(bg[2] + (fg[2] - bg[2]) * a),
+    )
+
+
+def render_ring(
+    size: int,
+    pct: float | None,
+    arc_color: str,
+    outside: str = CHROMA,
+    samples: int = 4,
+) -> tk.PhotoImage:
+    """Disco com anel de progresso, suavizado.
+
+    A borda externa e decidida por maioria (dentro ou fora) em vez de misturada
+    com `outside`: como a cor de fora vira transparencia no Windows, uma mistura
+    ali deixaria uma franja magenta em volta do circulo. Ja o anel, a pista e o
+    fundo -- todos internos -- sao misturados normalmente.
+    """
+    pct = -1.0 if pct is None else min(max(pct, 0.0), 100.0)
+    key = ("ring", size, round(pct), arc_color, P["bg"], P["border"], P["ring_track"])
+    cached = _SHAPE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    import math
+
+    center = size / 2
+    r_out = center - 0.5          # borda do disco
+    r_border = r_out - 1.2        # espessura da borda
+    ring_out = r_out - 2.5        # faixa do anel de progresso
+    ring_in = ring_out - 4.5
+
+    bg = _hex_to_rgb(P["bg"])
+    border = _hex_to_rgb(P["border"])
+    track = _hex_to_rgb(P["ring_track"])
+    arc = _hex_to_rgb(arc_color)
+    step = 1.0 / samples
+    total = samples * samples
+    limite = pct / 100 if pct >= 0 else -1.0
+
+    rows = []
+    for py in range(size):
+        row = []
+        for px in range(size):
+            dentro = 0
+            acc = [0.0, 0.0, 0.0]
+            for sy in range(samples):
+                dy = py + (sy + 0.5) * step - center
+                for sx in range(samples):
+                    dx = px + (sx + 0.5) * step - center
+                    dist = math.hypot(dx, dy)
+                    if dist > r_out:
+                        continue
+                    dentro += 1
+                    if dist > r_border:
+                        cor = border
+                    elif ring_in <= dist <= ring_out:
+                        # angulo medido do topo, no sentido horario
+                        t = ((math.atan2(dy, dx) + math.pi / 2) % (2 * math.pi)) / (
+                            2 * math.pi
+                        )
+                        cor = arc if 0 <= t <= limite else track
+                    else:
+                        cor = bg
+                    acc[0] += cor[0]
+                    acc[1] += cor[1]
+                    acc[2] += cor[2]
+            if dentro * 2 <= total:      # maioria fora: pixel transparente
+                row.append(outside)
+            else:
+                row.append(
+                    "#%02x%02x%02x"
+                    % (
+                        round(acc[0] / dentro),
+                        round(acc[1] / dentro),
+                        round(acc[2] / dentro),
+                    )
+                )
+        rows.append("{" + " ".join(row) + "}")
+
+    image = tk.PhotoImage(width=size, height=size)
+    image.put(" ".join(rows))
+    _SHAPE_CACHE[key] = image
+    return image
+
+
+def render_bar(
+    width: int, height: int, pct: float, color: str, samples: int = 4
+) -> tk.PhotoImage:
+    """Barra em capsula (cantos arredondados), suavizada nas pontas."""
+    pct = min(max(pct, 0.0), 100.0)
+    key = ("bar", width, height, round(pct, 1), color, P["bg"], P["track"])
+    cached = _SHAPE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    import math
+
+    raio = height / 2
+    preenchido = width * pct / 100
+    bg = _hex_to_rgb(P["bg"])
+    track = _hex_to_rgb(P["track"])
+    fill = _hex_to_rgb(color)
+    step = 1.0 / samples
+    total = samples * samples
+
+    def dentro_capsula(x: float, y: float, limite: float) -> bool:
+        """Retangulo com semicirculos nas pontas."""
+        if limite <= 0:
+            return False
+        if x < raio:
+            return math.hypot(x - raio, y - raio) <= raio
+        if x > limite - raio:
+            return math.hypot(x - (limite - raio), y - raio) <= raio
+        return True
+
+    rows = []
+    for py in range(height):
+        row = []
+        for px in range(width):
+            n_track = n_fill = 0
+            for sy in range(samples):
+                y = py + (sy + 0.5) * step
+                for sx in range(samples):
+                    x = px + (sx + 0.5) * step
+                    if not dentro_capsula(x, y, width):
+                        continue
+                    n_track += 1
+                    if preenchido >= height and dentro_capsula(x, y, preenchido):
+                        n_fill += 1
+            if not n_track:
+                row.append(P["bg"])
+                continue
+            cor = _blend(track, bg, n_track / total)
+            if n_fill:
+                cor = _blend(fill, _hex_to_rgb(cor), n_fill / n_track)
+            row.append(cor)
+        rows.append("{" + " ".join(row) + "}")
+
+    image = tk.PhotoImage(width=width, height=height)
+    image.put(" ".join(rows))
+    _SHAPE_CACHE[key] = image
+    return image
