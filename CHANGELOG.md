@@ -3,6 +3,16 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.2.1] — 2026-09-02
+
+### Corrigido
+
+- O controle de opacidade percorria a faixa inteira de alfa, e nas posições
+  baixas o widget se dissolvia no fundo — sem forma de enxergar o que ajustar.
+  A escala continua de 1 a 100 para quem usa, mas agora percorre de 40% a 100%
+  de opacidade real, onde o conteúdo permanece legível. Configurações gravadas
+  abaixo desse piso são normalizadas ao abrir.
+
 ## [0.2.0] — 2026-09-02
 
 ### Adicionado

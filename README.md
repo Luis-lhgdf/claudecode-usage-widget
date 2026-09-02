@@ -8,7 +8,7 @@
 
 <img src="docs/painel-escuro.png" width="270" alt="Painel do widget">
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.0-d97757)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.1-d97757)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-4d7a3a)
 ![Python](https://img.shields.io/badge/python-3.10%2B-d97757)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-6d6659)
@@ -59,7 +59,7 @@ Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o
 | Ação | Resultado |
 |---|---|
 | `↻` | Consulta o `/usage` agora |
-| `⚙` ou botão direito | Menu: modo, tema, intervalo, opacidade (1–100%) |
+| `⚙` ou botão direito | Menu: modo, tema, intervalo, opacidade |
 | `─` | Minimiza para o círculo |
 | `✕` ou `Esc` | Fecha |
 | Arrastar cabeçalho ou círculo | Move |

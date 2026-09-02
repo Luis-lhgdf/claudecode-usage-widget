@@ -48,7 +48,24 @@ MODES = ("mini", "panel")
 # uma sequencia de glifos.
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPIN_MS = 70
+
+# Abaixo de 40% de alfa o widget se dissolve no fundo e deixa de ser legivel.
+# O controle continua indo de 1 a 100 para o usuario; e essa faixa que ele
+# percorre de verdade.
+OPACIDADE_MINIMA = 0.40
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+
+def slider_para_alfa(valor: int) -> float:
+    """Converte a posicao do controle (1 a 100) em opacidade real."""
+    valor = min(max(valor, 1), 100)
+    return OPACIDADE_MINIMA + (valor - 1) / 99 * (1.0 - OPACIDADE_MINIMA)
+
+
+def alfa_para_slider(alfa: float) -> int:
+    """Caminho inverso, para o controle abrir na posicao correspondente."""
+    alfa = min(max(alfa, OPACIDADE_MINIMA), 1.0)
+    return round(1 + (alfa - OPACIDADE_MINIMA) / (1.0 - OPACIDADE_MINIMA) * 99)
 
 
 def fmt_duration_short(seconds: int) -> str:
@@ -317,6 +334,9 @@ class UsageWidget(tk.Tk):
         self.configure(bg=P["bg"])
         self.attributes("-topmost", self.cfg.always_on_top)
         try:
+            # Uma configuracao antiga pode trazer um valor abaixo do minimo; o
+            # widget abriria invisivel e sem como ser ajustado.
+            self.cfg.opacity = max(self.cfg.opacity, OPACIDADE_MINIMA)
             self.attributes("-alpha", self.cfg.opacity)
             # Deixa o canto do circulo transparente no modo mini.
             self.attributes("-transparentcolor", CHROMA)
@@ -666,18 +686,18 @@ class UsageWidget(tk.Tk):
             font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
         rotulo = tk.Label(
-            topo, text=f"{round(self.cfg.opacity * 100)}%", bg=P["bg"], fg=P["fg"],
-            font=("Segoe UI", 11, "bold"),
+            topo, text=f"{alfa_para_slider(self.cfg.opacity)}%", bg=P["bg"],
+            fg=P["fg"], font=("Segoe UI", 11, "bold"),
         )
         rotulo.pack(side="right")
 
         def mudou(valor: int) -> None:
             rotulo.configure(text=f"{valor}%")
-            self._set_opacity(valor / 100)
+            self._set_opacity(slider_para_alfa(valor))
 
         largura = WIDTH - PAD * 2
         Slider(
-            corpo, largura, round(self.cfg.opacity * 100), 1, 100, mudou
+            corpo, largura, alfa_para_slider(self.cfg.opacity), 1, 100, mudou
         ).pack(padx=PAD, pady=(8, 4))
 
         tk.Label(
