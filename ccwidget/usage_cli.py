@@ -1,13 +1,8 @@
-"""Fonte alternativa de percentuais oficiais: `claude -p "/usage"`.
+"""A fonte de dados do widget: `claude -p "/usage"`.
 
-A ponte de status line e o caminho preferido -- ela nao custa nada e atualiza
-sozinha. Mas `rate_limits` so e entregue a assinantes Pro e Max, enquanto o
-comando `/usage` responde tambem em contas Team. Este modulo cobre esse caso,
-e tambem serve para quem nao quer instalar a status line.
-
-O comando e local: nao ha resposta de modelo, entao nao consome tokens. Ainda
-assim leva alguns segundos para iniciar o CLI, por isso e chamado sob demanda
-(ou em intervalo longo), nunca a cada atualizacao da tela.
+O comando e local -- nao ha resposta de modelo, entao nao consome tokens --,
+mas leva alguns segundos para o CLI iniciar. Por isso e chamado em intervalo
+(dez minutos por padrao) e sob demanda, nunca no laco da interface.
 
 Texto esperado:
 
@@ -18,10 +13,14 @@ Texto esperado:
 
 from __future__ import annotations
 
+import json
+import os
 import re
 import subprocess
+import tempfile
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 try:
     from zoneinfo import ZoneInfo
@@ -86,20 +85,16 @@ def _parse_reset(when: str | None, tz_name: str | None) -> float | None:
 
 
 def parse_usage_output(text: str) -> dict:
-    """Extrai as janelas de limite do texto do `/usage`.
-
-    Devolve o mesmo formato que a status line publica, para o widget nao
-    precisar saber de qual fonte veio.
-    """
+    """Extrai as janelas de limite do texto do `/usage`."""
     limits: dict[str, dict] = {}
     for key, pattern in PATTERNS.items():
         match = pattern.search(text)
         if not match:
             continue
-        window: dict = {
-            "used_percentage": float(match.group(1).replace(",", "."))
-        }
-        resets_at = _parse_reset(match.groupdict().get("when"), match.groupdict().get("tz"))
+        window: dict = {"used_percentage": float(match.group(1).replace(",", "."))}
+        resets_at = _parse_reset(
+            match.groupdict().get("when"), match.groupdict().get("tz")
+        )
         if resets_at:
             window["resets_at"] = resets_at
         limits[key] = window
@@ -107,10 +102,10 @@ def parse_usage_output(text: str) -> dict:
 
 
 def fetch(timeout: int = 90, executable: str = "claude") -> dict:
-    """Roda `claude -p "/usage"` e devolve as janelas encontradas.
+    """Roda o comando e devolve as janelas encontradas.
 
-    Levanta RuntimeError com uma mensagem curta quando o comando falha, para o
-    widget poder mostrar o motivo sem quebrar.
+    Levanta RuntimeError com uma mensagem curta quando falha, para o widget
+    poder mostrar o motivo sem quebrar.
     """
     try:
         proc = subprocess.run(
@@ -137,35 +132,21 @@ def fetch(timeout: int = 90, executable: str = "claude") -> dict:
 
 
 def refresh_state(state_path=None) -> dict:
-    """Roda o `/usage` e grava o resultado onde o widget le."""
-    import json
-    import os
-    import tempfile
-    from pathlib import Path
+    """Consulta o `/usage` e grava o resultado onde o widget le.
 
+    A escrita e atomica, para o widget nunca ler um arquivo pela metade. O
+    conteudo anterior e substituido por inteiro: o que a consulta nao devolveu
+    nao vale mais.
+    """
     from .state import STATE_PATH
 
     target = Path(state_path) if state_path else STATE_PATH
     limits = fetch()
-
-    # Preserva o que a status line ja tinha publicado (modelo, custo, contexto).
-    existing: dict = {}
-    try:
-        existing = json.loads(target.read_text(encoding="utf-8-sig"))
-    except (OSError, json.JSONDecodeError, ValueError):
-        pass
-
-    merged = dict(limits)
-    for key, value in (existing.get("rate_limits") or {}).items():
-        merged.setdefault(key, value)
-
-    existing["rate_limits"] = merged
-    existing["updated_at"] = time.time()
-    existing["source"] = "cli"
+    estado = {"updated_at": time.time(), "rate_limits": limits}
 
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump(existing, fh, ensure_ascii=False)
+        json.dump(estado, fh, ensure_ascii=False)
     os.replace(tmp, target)
-    return merged
+    return limits

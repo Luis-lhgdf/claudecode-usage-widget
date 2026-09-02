@@ -22,7 +22,7 @@ import tkinter as tk
 from datetime import datetime
 
 from .config import Config, local_timezone
-from .state import LiveState, read_state
+from .state import read_state
 from .theme import (
     CHROMA,
     MASCOT_H,
@@ -46,7 +46,6 @@ MODES = ("mini", "panel")
 SPINNER = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 SPIN_MS = 70
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
-
 
 
 def fmt_duration_short(seconds: int) -> str:
@@ -648,12 +647,7 @@ class UsageWidget(tk.Tk):
         self.week_meter.update_values(window.used_percentage, caption)
 
     def _render_footer(self) -> None:
-        """Rodape: quando o dado foi lido e quando sera lido de novo.
-
-        Substitui o antigo selo "oficial/antigo", que descrevia a fonte numa
-        epoca em que havia duas. Com uma fonte so, o que resta a informar e a
-        idade do numero -- e isso e melhor dito com o tempo do que com rotulo.
-        """
+        """Rodape: quando o dado foi lido e quando sera lido de novo."""
         if self._cli_busy:
             self.footer.configure(text="consultando /usage…", fg=P["fg_dim"])
             return

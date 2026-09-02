@@ -24,7 +24,6 @@ def local_timezone():
 class Config:
     # --- atualizacao -------------------------------------------------------
     refresh_seconds: int = 20
-    history_days: int = 30
     # Intervalo entre consultas automaticas ao `claude -p /usage`, em minutos.
     # 0 desliga e deixa a busca so no menu. O comando nao consome tokens, mas
     # inicia o CLI a cada vez, entao nao vale rodar de minuto em minuto.

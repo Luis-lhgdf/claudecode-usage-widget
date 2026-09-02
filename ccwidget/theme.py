@@ -1,8 +1,12 @@
-"""Paletas do widget e o mascote do Claude Code.
+"""Paletas, mascote e as formas desenhadas do widget.
 
 As cores ficam num dicionario global (`P`) trocado por `set_theme`. Os
 componentes leem a paleta na construcao, entao alternar o tema reconstroi a
 interface -- mais simples e confiavel do que reconfigurar dezenas de widgets.
+
+Aqui tambem ficam o mascote (pixel art) e as formas curvas -- disco, anel e
+barras --, rasterizadas com antialiasing proprio porque o Canvas do tkinter
+nao suaviza bordas.
 """
 
 from __future__ import annotations

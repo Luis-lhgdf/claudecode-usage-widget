@@ -19,7 +19,7 @@ param([switch]$Remove)
 $ErrorActionPreference = "Stop"
 
 $startup = [Environment]::GetFolderPath("Startup")
-$shortcut = Join-Path $startup "Claude Code Usage Widget.lnk"
+$shortcut = Join-Path $startup "CC Widget.lnk"
 
 if ($Remove) {
     if (Test-Path $shortcut) {
@@ -51,7 +51,7 @@ $link = $shell.CreateShortcut($shortcut)
 $link.TargetPath = $pythonw
 $link.Arguments = "`"$target`""
 $link.WorkingDirectory = $repo
-$link.Description = "Widget de uso do Claude Code"
+$link.Description = "CC Widget - uso do Claude Code"
 $link.Save()
 
 Write-Host ""
