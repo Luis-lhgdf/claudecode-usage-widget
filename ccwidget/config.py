@@ -29,6 +29,10 @@ class Config:
     # inicia o CLI a cada vez, entao nao vale rodar de minuto em minuto.
     usage_refresh_minutes: int = 10
 
+    # Versao registrada pelo instalador, para ele saber o que ja esta na
+    # maquina e decidir entre instalar, atualizar ou reinstalar.
+    installed_version: str | None = None
+
     # --- janela ------------------------------------------------------------
     # mode: "mini" (so o circulo), "summary" (sessao + semana) ou "full".
     mode: str = "summary"

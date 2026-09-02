@@ -21,6 +21,7 @@ import time
 import tkinter as tk
 from datetime import datetime
 
+from . import __version__
 from .config import Config, local_timezone
 from .state import read_state
 from .theme import (
@@ -419,6 +420,8 @@ class UsageWidget(tk.Tk):
         self.menu.add_cascade(label="Opacidade", menu=opacity)
         self.menu.add_separator()
         self.menu.add_command(label="Fechar", command=self.quit_widget)
+        self.menu.add_separator()
+        self.menu.add_command(label=f"CC Widget {__version__}", state="disabled")
 
     # ------------------------------------------------------------------ modos
 

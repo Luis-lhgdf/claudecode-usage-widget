@@ -8,6 +8,7 @@
 
 <img src="docs/painel-escuro.png" width="270" alt="Painel do widget">
 
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.1.0-d97757)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-4d7a3a)
 ![Python](https://img.shields.io/badge/python-3.10%2B-d97757)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-6d6659)
@@ -31,14 +32,18 @@ Projeto não-oficial
 git clone https://github.com/Luis-lhgdf/claudecode-usage-widget.git
 cd claudecode-usage-widget
 
-.\scripts\install.ps1     # cria os atalhos
-pythonw run_widget.pyw    # abre agora
+.\scripts\install.ps1
 ```
+
+O instalador cria os atalhos, registra a versão e abre o widget.
 
 | Arquivo | Para que serve |
 |---|---|
-| `run_widget.pyw` | **Abre o widget.** É o que você executa para usar. A extensão `.pyw` faz o Windows usar `pythonw.exe`, sem janela de console |
-| `scripts/install.ps1` | **Roda uma vez.** Cria dois atalhos para o `run_widget.pyw` — um na pasta Inicializar, para subir com o Windows, outro na área de trabalho. Mostra os caminhos no fim e `-Remove` desfaz |
+| `scripts/install.ps1` | **Instala.** Cria dois atalhos com o ícone do mascote — um na pasta Inicializar, para subir com o Windows, outro na área de trabalho — e abre o widget. Rodar de novo é seguro: compara a versão do repositório com a registrada e diz se é instalação, atualização ou reinstalação |
+| `scripts/uninstall.ps1` | **Desinstala.** Fecha o widget e remove os atalhos. As preferências ficam; `-Tudo` apaga `~/.ccwidget` também |
+| `run_widget.pyw` | **Abre o widget** sem passar pelo instalador. A extensão `.pyw` faz o Windows usar `pythonw.exe`, sem janela de console |
+
+Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o widget na versão nova.
 
 ## Modos
 
@@ -87,7 +92,7 @@ python -m ccwidget report    # imprime os percentuais
 
 ## Configuração
 
-Tudo em `~/.ccwidget/config.json`: modo, tema, posição, opacidade e `usage_refresh_minutes` (`0` desliga a consulta automática). O menu cobre todos eles.
+Tudo em `~/.ccwidget/config.json`: modo, tema, posição, opacidade, `usage_refresh_minutes` (`0` desliga a consulta automática) e a versão instalada. O menu cobre as preferências; a versão quem escreve é o instalador.
 
 ## Estrutura
 
@@ -100,16 +105,16 @@ ccwidget/
   config.py      preferências
   __main__.py    entrada (widget / usage / report)
 run_widget.pyw   abre sem console
-scripts/         instalador dos atalhos
+scripts/         install.ps1, uninstall.ps1 e as funções comuns
+assets/          ícone do mascote (.ico)
 ```
 
 ## Desinstalar
 
 ```powershell
-.\scripts\install.ps1 -Remove
+.\scripts\uninstall.ps1          # remove os atalhos, mantém as preferências
+.\scripts\uninstall.ps1 -Tudo    # remove também ~/.ccwidget
 ```
-
-Depois remova `~/.ccwidget/`.
 
 ---
 
