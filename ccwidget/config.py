@@ -40,9 +40,11 @@ class Config:
     weekly_anchor: str | None = None
 
     # --- janela ------------------------------------------------------------
+    # mode: "mini" (so o circulo), "summary" (sessao + semana) ou "full".
+    mode: str = "summary"
     pos_x: int = 40
     pos_y: int = 40
-    opacity: float = 0.94
+    opacity: float = 0.96
     always_on_top: bool = True
     show_projects: bool = True
     show_models: bool = False
@@ -52,8 +54,10 @@ class Config:
     @classmethod
     def load(cls) -> "Config":
         try:
-            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            # utf-8-sig: o PowerShell grava UTF-8 com BOM, e um BOM faria o
+            # json.loads falhar, descartando a configuracao em silencio.
+            data = json.loads(CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError, ValueError):
             return cls()
         known = {f for f in cls.__dataclass_fields__}
         return cls(**{k: v for k, v in data.items() if k in known})

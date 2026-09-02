@@ -81,7 +81,7 @@ def read_state(path: Path | None = None) -> LiveState:
     """Le o estado do disco. Nunca levanta excecao: sem arquivo, devolve vazio."""
     target = path or STATE_PATH
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError, ValueError):
         return LiveState()
     if not isinstance(raw, dict):

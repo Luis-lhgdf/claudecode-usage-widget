@@ -2,29 +2,41 @@
 
 # Claude Code Usage Widget
 
-**A floating desktop widget that shows your Claude Code usage — 5-hour session, weekly limit, tokens and cost — always on top, always current.**
+**Widget flutuante que mostra seu consumo do Claude Code direto na área de trabalho: sessão de 5 horas, limite semanal, tokens e valor equivalente. Sempre acima das outras janelas.**
 
-<img src="docs/screenshot.png" width="298" alt="The widget showing session and weekly limit bars, token count, estimated value and top projects">
+<img src="docs/modo-completo.png" width="294" alt="Modo completo do widget">
 
-Windows · Python 3.10+ · no dependencies · unofficial
+Windows · Python 3.10+ · sem dependências · projeto não-oficial
 
 </div>
 
 ---
 
-## Why
+## Por quê
 
-Phones have widgets for everything. Desktops mostly don't. And the number that actually matters while you work — *how much of my 5-hour window is gone?* — is buried behind `/usage`, which you have to stop and type.
+Celular tem widget para tudo. Computador, quase nada. E o número que realmente importa enquanto você trabalha — *quanto já foi da minha janela de 5 horas?* — fica escondido atrás do `/usage`, que você precisa parar e digitar.
 
-This puts it on your screen permanently.
+Isso põe o número na tela, permanentemente.
 
-## How it works
+## Três modos
 
-The widget reads two sources and is explicit about which one each number comes from.
+Alterne pelo botão `⋮`, por duplo clique no cabeçalho, ou clicando no círculo.
 
-**1. Official percentages — via the status line**
+<table>
+<tr>
+<td align="center" width="33%"><img src="docs/modo-mini.png" width="62" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Só o círculo, com anel<br>de progresso da sessão</sub></td>
+<td align="center" width="33%"><img src="docs/modo-resumo.png" width="220" alt="Modo resumo"><br><b>Resumo</b><br><sub>Sessão atual e semana</sub></td>
+<td align="center" width="33%"><img src="docs/modo-completo.png" width="220" alt="Modo completo"><br><b>Completo</b><br><sub>+ tokens, valor e projetos</sub></td>
+</tr>
+</table>
 
-Claude Code passes a JSON payload to whatever command you configure as your `statusLine`, and that payload contains the real numbers:
+## Como funciona
+
+O widget lê duas fontes e deixa explícito de onde vem cada número.
+
+**1. Percentuais oficiais — pela status line**
+
+O Claude Code entrega um JSON para o comando configurado como `statusLine`, e esse JSON traz os números reais:
 
 ```json
 "rate_limits": {
@@ -33,136 +45,124 @@ Claude Code passes a JSON payload to whatever command you configure as your `sta
 }
 ```
 
-This project installs a tiny bridge as your status line. It writes that payload to `~/.ccwidget/state.json` and prints a compact status line back to your terminal, so the row isn't wasted:
+Este projeto instala uma ponte como sua status line. Ela grava esse payload em `~/.ccwidget/state.json` e devolve uma status line compacta ao terminal, para a linha não ser desperdiçada:
 
 ```
 ◆ Opus │ ctx 62% │ 5h ██░░░░░░░░ 21% ↻37min │ 7d 3% │ $1.23
 ```
 
-No API calls, no tokens spent, no polling — it just piggybacks on a render that was going to happen anyway (~60 ms).
+Sem chamada de API, sem gastar token, sem polling — apenas aproveita uma renderização que já ia acontecer (~60 ms).
 
-**2. Tokens, cost and projects — from local session logs**
+**2. Tokens, valor e projetos — dos logs locais**
 
-Claude Code writes every session to `~/.claude/projects/**/*.jsonl`. The widget parses those for token counts, cost and per-project breakdown.
+O Claude Code grava cada sessão em `~/.claude/projects/**/*.jsonl`. O widget lê esses arquivos para tokens, valor equivalente e ranking por projeto.
 
-Two details matter here, and getting them wrong is the usual reason homemade usage trackers report inflated numbers:
+Dois detalhes importam aqui, e errá-los é o motivo usual de medidores caseiros reportarem números inflados:
 
-- **Deduplication.** A single API response is written as *several* lines — one per content block — each repeating the same `usage` object. Counting line by line inflates totals by roughly 3×. This project deduplicates by `requestId`.
-- **Incremental reads.** Re-parsing hundreds of files every refresh is slow. Byte offsets are cached per file, so only new content is read. Cold start ≈ 2.5 s over 23k requests; every refresh after that ≈ 20 ms.
+- **Deduplicação.** Uma única resposta da API é gravada em *várias* linhas — uma por bloco de conteúdo — cada uma repetindo o mesmo objeto `usage`. Contar linha a linha infla os totais em cerca de 3×. Aqui a deduplicação é por `requestId`.
+- **Leitura incremental.** Reprocessar centenas de arquivos a cada atualização é lento. O offset em bytes de cada arquivo é guardado, então só o conteúdo novo é lido. Carga inicial ≈ 2,5 s para 23 mil requisições; cada atualização seguinte ≈ 20 ms.
 
-## Install
+## Instalação
 
 ```powershell
 git clone https://github.com/Luis-lhgdf/claudecode-usage-widget.git
 cd claudecode-usage-widget
 
-# 1. feed the widget the official percentages
+# 1. alimenta o widget com os percentuais oficiais
 .\scripts\install-statusline.ps1
 
-# 2. (optional) launch it with Windows
+# 2. (opcional) abre junto com o Windows
 .\scripts\install-startup.ps1
 ```
 
-Then open a Claude Code session and send one message — `rate_limits` only appears after the first API response. Launch the widget with:
+Depois abra uma sessão do Claude Code e envie uma mensagem — `rate_limits` só aparece após a primeira resposta da API. Para abrir o widget:
 
 ```powershell
 pythonw run_widget.pyw
 ```
 
-`install-statusline.ps1` backs up `settings.json` before touching it, and refuses to overwrite an existing status line unless you pass `-Force`.
+O `install-statusline.ps1` faz backup do `settings.json` antes de mexer, e se recusa a sobrescrever uma status line existente sem `-Force`.
 
-## Usage
+## Uso
 
-| Action | Result |
+| Ação | Resultado |
 |---|---|
-| Drag the header | Move the widget |
-| Right-click | Menu: always on top, projects, opacity, refresh, quit |
-| Double-click | Refresh now |
-| `✕` or `Esc` | Close |
+| Arrastar o cabeçalho (ou o círculo) | Move o widget |
+| Clicar no círculo | Abre o modo resumo |
+| Duplo clique no cabeçalho | Alterna resumo ↔ completo |
+| `–` | Minimiza para o círculo |
+| `⋮` ou botão direito | Menu: modos, sempre visível, projetos, opacidade |
+| `✕` ou `Esc` | Fecha |
 
-Prefer the terminal? Same numbers, no window:
+Prefere o terminal? Os mesmos números, sem janela:
 
 ```bash
 python -m ccwidget report
 ```
 
-Position, opacity and preferences persist in `~/.ccwidget/config.json`.
+Posição, modo, opacidade e preferências ficam em `~/.ccwidget/config.json`.
 
-## Reading the numbers
+## Lendo os números
 
-The badge in the top-right tells you where the percentages come from:
+O selo no canto superior direito diz de onde vêm os percentuais:
 
-| Badge | Meaning |
+| Selo | Significado |
 |---|---|
-| `official` | Live figures from the status line — identical to `/usage` |
-| `cached` | Official figures, but no session has rendered recently |
-| `local` | No official data; the session bar shows *window elapsed*, not consumption |
+| `oficial` | Números vivos da status line — idênticos aos do `/usage` |
+| `cache` | Números oficiais, mas nenhuma sessão renderizou recentemente |
+| `local` | Sem dado oficial; a barra da sessão mostra o *tempo decorrido* da janela, não o consumo |
 
-**Anything prefixed with `~` is an estimate.** The dollar figure is *API-equivalent value*, not a charge: on a Pro/Max/Team subscription you don't pay per token. It's useful for comparing sessions and for seeing what your subscription is worth — not for predicting a bill.
+**Tudo com o prefixo `~` é estimativa.** O valor em dólar é *equivalente de API*, não cobrança: em assinatura Pro/Max/Team você não paga por token. Serve para comparar sessões e ver quanto sua assinatura vale — não para prever fatura.
 
-## Accuracy and limits
+## Precisão e limites
 
-Stated plainly, because usage tools that overstate their precision are worse than no tool:
+Dito de forma direta, porque medidor que exagera a própria precisão é pior que medidor nenhum:
 
-- **`rate_limits` requires a Claude.ai Pro or Max subscription** (or a Claude apps gateway with a spend limit), and appears only after the first API response of a session. Without it, the widget falls back to local estimates and labels them as such.
-- **Local logs only cover this machine.** Other devices and claude.ai aren't included — the same caveat `/usage` itself carries. In testing, a 5-hour block had actually started 11 minutes before the earliest local log entry, because of activity on another device. The official percentages don't have this problem; the local estimates do.
-- **Cost is computed from public API prices** (`ccwidget/pricing.py`), including the cache multipliers: 1.25× input for a 5-minute write, 2× for 1-hour, 0.1× for reads. Unknown models fall back to Opus-tier pricing.
-- **The widget doesn't refresh the official numbers on its own.** They update when Claude Code renders its status line. If you haven't used it in a while, the badge says `cached` and the age is shown in the footer.
+- **`rate_limits` exige assinatura Claude.ai Pro ou Max** (ou um gateway com limite de gasto), e só aparece depois da primeira resposta da API na sessão. Sem ele, o widget cai para as estimativas locais e sinaliza isso no selo.
+- **Os logs locais cobrem apenas esta máquina.** Outros dispositivos e o claude.ai não entram — a mesma ressalva que o próprio `/usage` faz. Em teste, um bloco de 5 horas havia começado 11 minutos antes do registro local mais antigo, por uso em outro dispositivo. Os percentuais oficiais não têm esse problema; as estimativas locais têm.
+- **O valor vem dos preços públicos da API** (`ccwidget/pricing.py`), com os multiplicadores de cache: 1,25× o input para escrita de 5 minutos, 2× para 1 hora, 0,1× para leitura. Modelos desconhecidos usam a faixa Opus.
+- **O widget não atualiza os números oficiais sozinho.** Eles mudam quando o Claude Code renderiza a status line. Se você ficou um tempo sem usar, o selo mostra `cache` e o rodapé informa há quanto tempo.
 
-## Layout
+## Estrutura
 
 ```
 ccwidget/
-  collector.py   incremental JSONL reader, dedup by requestId
-  analytics.py   5-hour blocks, weekly windows, grouping
-  pricing.py     model price table and cost math
-  state.py       reads what the status line published
-  statusline.py  the bridge: writes state, prints the status line
-  ui.py          the tkinter widget
-  __main__.py    entry point (widget / report / statusline)
-statusline_hook.py   what Claude Code invokes
-run_widget.pyw       launches without a console window
-scripts/             PowerShell installers
+  collector.py   leitura incremental dos JSONL, dedup por requestId
+  analytics.py   blocos de 5h, janela semanal, agrupamentos
+  pricing.py     tabela de preços por modelo e cálculo de custo
+  state.py       lê o que a status line publicou
+  statusline.py  a ponte: grava o estado e imprime a status line
+  ui.py          o widget tkinter, com os três modos
+  __main__.py    entrada (widget / report / statusline)
+statusline_hook.py   o que o Claude Code invoca
+run_widget.pyw       abre sem janela de console
+scripts/             instaladores PowerShell
 ```
 
-## Uninstall
+## Desinstalar
 
 ```powershell
-.\scripts\install-startup.ps1 -Remove          # remove from startup
+.\scripts\install-startup.ps1 -Remove
 ```
 
-Then delete the `statusLine` key from `~/.claude/settings.json` (a timestamped backup sits next to it) and remove `~/.ccwidget/`.
+Depois apague a chave `statusLine` de `~/.claude/settings.json` (há um backup datado ao lado) e remova a pasta `~/.ccwidget/`.
 
 ---
 
-## Português
+## English
 
-Widget flutuante que mostra seu consumo do Claude Code direto na área de trabalho: sessão de 5 horas, limite semanal, tokens e valor equivalente.
+A floating desktop widget for Claude Code usage: 5-hour session window, weekly limit, tokens and API-equivalent value — always on top, with three modes (a minimized ring, a summary, and a full panel).
 
-Os percentuais são **os oficiais** — vêm do mesmo lugar que o `/usage`, através de uma ponte instalada como status line do Claude Code, sem gastar tokens nem fazer chamadas de API. Tokens, custo e ranking de projetos saem dos logs locais de sessão.
+The percentages are **the official ones**. Claude Code hands a JSON payload containing `rate_limits` to whatever command you set as your `statusLine`; this project installs a small bridge there, which stores the payload for the widget and prints a compact status line back to your terminal. No API calls, no tokens spent, ~60 ms per render. Tokens, cost and the per-project ranking come from the local session logs in `~/.claude/projects`, deduplicated by `requestId` (a single response is written as several lines repeating the same `usage` object — counting them raw inflates totals ~3×) and read incrementally via cached byte offsets.
 
-Instalação:
+Requires a Pro or Max subscription for the official percentages; without them the widget falls back to local estimates and labels them. Local logs only cover this machine, not other devices or claude.ai. Anything prefixed `~` is an estimate, and the dollar figure is API-equivalent value, not a charge.
 
-```powershell
-.\scripts\install-statusline.ps1     # alimenta os percentuais oficiais
-.\scripts\install-startup.ps1        # opcional: abre junto com o Windows
-pythonw run_widget.pyw               # abre agora
-```
-
-Tudo que aparece com `~` é estimativa. O valor em dólar é **equivalente de API**, não cobrança: em assinatura Pro/Max/Team você não paga por token — serve para comparar sessões e ver quanto sua assinatura vale.
-
-Requer assinatura Pro ou Max para os percentuais oficiais; sem eles, o widget mostra estimativas locais e sinaliza isso no badge. Os logs locais cobrem apenas esta máquina, não outros dispositivos nem o claude.ai.
-
-Relatório em texto, sem janela:
-
-```bash
-python -m ccwidget report
-```
+**The interface is in Portuguese.** Install with `.\scripts\install-statusline.ps1`, run with `pythonw run_widget.pyw`, or use `python -m ccwidget report` for a terminal summary.
 
 ---
 
-## License
+## Licença
 
-MIT — see [LICENSE](LICENSE).
+MIT — veja [LICENSE](LICENSE).
 
-Not affiliated with Anthropic. "Claude" is a trademark of Anthropic, PBC. This project reads local files that Claude Code already writes; it doesn't modify Claude Code or call any private API.
+Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC. Este projeto apenas lê arquivos locais que o Claude Code já grava; não modifica o Claude Code nem chama nenhuma API privada.

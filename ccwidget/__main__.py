@@ -31,7 +31,7 @@ def _report() -> None:
         return "█" * filled + "░" * (width - filled)
 
     print()
-    print("  CLAUDE CODE USAGE")
+    print("  USO DO CLAUDE CODE")
     print("  " + "─" * 46)
 
     # Sessao de 5 horas
@@ -42,10 +42,10 @@ def _report() -> None:
             if five.resets_at
             else "--"
         )
-        print(f"  Session   {bar(five.used_percentage)} {five.used_percentage:5.1f}%")
-        print(f"            resets {reset}")
+        print(f"  Sessão    {bar(five.used_percentage)} {five.used_percentage:5.1f}%")
+        print(f"            reinicia {reset}")
     else:
-        print("  Session   (sem dado oficial — instale a status line)")
+        print("  Sessão    (sem dado oficial — instale a status line)")
 
     # Semana
     week = live.seven_day if live.seven_day and not live.seven_day.expired else None
@@ -55,8 +55,8 @@ def _report() -> None:
             if week.resets_at
             else "--"
         )
-        print(f"  Week      {bar(week.used_percentage)} {week.used_percentage:5.1f}%")
-        print(f"            resets {reset}")
+        print(f"  Semana    {bar(week.used_percentage)} {week.used_percentage:5.1f}%")
+        print(f"            reinicia {reset}")
 
     # Bloco atual pelos logs locais
     block = current_block(collector.requests, now=now, anchor=cfg.block_anchor_dt())
