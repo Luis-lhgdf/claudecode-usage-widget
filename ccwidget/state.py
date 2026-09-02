@@ -1,8 +1,8 @@
-"""Leitura do estado publicado pela ponte de status line.
+"""Leitura dos percentuais oficiais gravados por `ccwidget.usage_cli`.
 
-Este e o unico caminho para os numeros *oficiais* de limite. Quando o arquivo
-nao existe (status line nao instalada) ou esta velho demais, o widget cai para
-a estimativa calculada a partir dos logs locais.
+O arquivo e escrito depois de cada consulta ao `claude -p "/usage"`. Se ele
+nao existe, nenhuma consulta foi feita ainda -- o widget diz isso em vez de
+estimar consumo por conta propria.
 """
 
 from __future__ import annotations
@@ -14,9 +14,8 @@ from pathlib import Path
 
 STATE_PATH = Path.home() / ".ccwidget" / "state.json"
 
-# Acima disso o estado e considerado velho: nenhuma sessao do Claude Code
-# renderizou a status line recentemente.
-STALE_AFTER_SECONDS = 15 * 60
+# Acima disso o dado e considerado velho e o widget sinaliza na interface.
+STALE_AFTER_SECONDS = 20 * 60
 
 
 @dataclass(slots=True)
@@ -38,15 +37,11 @@ class Window:
 
 @dataclass(slots=True)
 class LiveState:
-    """Estado publicado pela status line do Claude Code."""
+    """Ultimo resultado conhecido do `/usage`."""
 
     updated_at: float = 0.0
-    model: str | None = None
-    session_cost: float | None = None
-    context_used_percentage: float | None = None
     five_hour: Window | None = None
     seven_day: Window | None = None
-    spend_limit: Window | None = None
 
     @property
     def age_seconds(self) -> float:
@@ -88,15 +83,8 @@ def read_state(path: Path | None = None) -> LiveState:
         return LiveState()
 
     limits = raw.get("rate_limits") or {}
-    cost = raw.get("cost") or {}
-    ctx = raw.get("context_window") or {}
-
     return LiveState(
         updated_at=float(raw.get("updated_at") or 0.0),
-        model=raw.get("model"),
-        session_cost=cost.get("total_cost_usd"),
-        context_used_percentage=ctx.get("used_percentage"),
         five_hour=_window(limits.get("five_hour")),
         seven_day=_window(limits.get("seven_day")),
-        spend_limit=_window(limits.get("spend_limit")),
     )

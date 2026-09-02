@@ -3,83 +3,41 @@
 Janela sem bordas, sempre acima das outras, arrastavel para qualquer canto da
 tela, montada com tkinter (biblioteca padrao -- nao ha nada para instalar).
 
-Tres modos, alternados pelo botao de menu no topo ou por duplo clique:
+Dois modos, alternados pelo botao de menu, por duplo clique no cabecalho ou
+clicando no circulo:
 
-* **mini**    -- so um circulo flutuante com o anel de progresso da sessao.
-* **resumo**  -- sessao de 5 horas e limite semanal.
-* **completo**-- acrescenta tokens, valor equivalente e ranking de projetos.
+* **mini**   -- so um circulo flutuante com o mascote e o anel da sessao.
+* **painel** -- sessao de 5 horas e limite semanal, com barras e horarios.
 
-Duas fontes alimentam a tela:
-
-* **Oficial** -- percentuais e horarios de reset publicados pela ponte de
-  status line (`ccwidget.statusline`). Sao os mesmos numeros do `/usage`.
-* **Local**   -- tokens, valor equivalente e projetos, calculados dos logs de
-  sessao. Aparecem sempre, e viram fallback quando o oficial falta.
-
-Tudo que e estimado leva o prefixo `~`, para nao se confundir com dado oficial.
+Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`, consultado
+em intervalo configuravel e sob demanda pelo menu. O widget nao estima consumo
+por conta propria -- quando o dado oficial falta, ele diz que falta.
 """
 
 from __future__ import annotations
 
-import math
 import threading
 import tkinter as tk
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
-from .analytics import current_block, group_by, week_period
-from .collector import Collector
 from .config import Config, local_timezone
 from .state import LiveState, read_state
-
-# ---------------------------------------------------------------- aparencia
-
-BG = "#171614"
-BG_SOFT = "#201e1b"
-BORDER = "#332f2a"
-FG = "#ebe7e1"
-FG_DIM = "#8b8378"
-FG_FAINT = "#5f594f"
-ACCENT = "#d97757"
-TRACK = "#2c2925"
-
-OK = "#7fa66a"
-WARN = "#d8a244"
-CRIT = "#d1614f"
-# Usada quando a barra representa tempo decorrido, nao consumo: a escala
-# verde/amarelo/vermelho sugeriria um limite se aproximando, que e outra coisa.
-NEUTRAL = "#6f6759"
-
-# Cor que o Windows torna transparente: precisa ser uma que nunca apareca no
-# desenho real, senao buracos aparecem no widget.
-CHROMA = "#ff00fe"
+from .theme import (
+    CHROMA,
+    MASCOT_H,
+    MASCOT_W,
+    P,
+    level_color,
+    render_mascot,
+    set_theme,
+)
 
 PAD = 14
-WIDTH = 292
-RING_SIZE = 62
+WIDTH = 268
+RING_SIZE = 64
 
-MODES = ("mini", "summary", "full")
-
-
-def level_color(pct: float) -> str:
-    if pct >= 85:
-        return CRIT
-    if pct >= 60:
-        return WARN
-    return OK
-
-
-def fmt_tokens(value: int) -> str:
-    if value >= 1_000_000_000:
-        return f"{value / 1_000_000_000:.1f}B".replace(".", ",")
-    if value >= 1_000_000:
-        return f"{value / 1_000_000:.1f}M".replace(".", ",")
-    if value >= 1_000:
-        return f"{value / 1_000:.0f}k"
-    return str(value)
-
-
-def fmt_money(value: float) -> str:
-    return f"${value:,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+MODES = ("mini", "panel")
+DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
 
 def fmt_duration(seconds: int) -> str:
@@ -93,174 +51,60 @@ def fmt_duration(seconds: int) -> str:
     return f"{minutes} min"
 
 
-def fmt_duration_short(seconds: int) -> str:
-    """Versao para o circulo, onde cabem poucos caracteres: '2h05', '17m'."""
-    if seconds <= 0:
-        return "0m"
-    minutes = seconds // 60
-    hours, minutes = divmod(minutes, 60)
-    return f"{hours}h{minutes:02d}" if hours else f"{minutes}m"
+class Mascot(tk.Canvas):
+    """O mascote do Claude Code como widget."""
 
-
-_MARK_CACHE: dict[tuple, tk.PhotoImage] = {}
-
-
-def _mark_shape(size: int) -> tuple[int, float]:
-    """Numero de raios e afinamento adequados ao tamanho pedido.
-
-    Onze raios finos so se resolvem acima de ~26px; abaixo disso cada raio
-    ocupa menos de um pixel e o simbolo vira um borrao apagado. Reduzir a
-    contagem em tamanhos pequenos preserva a leitura -- mesma ideia do hinting
-    de fontes.
-    """
-    if size < 20:
-        return 8, 2.2
-    if size < 26:
-        return 9, 2.6
-    if size < 34:
-        return 11, 3.2
-    return 11, 4.0
-
-
-def _hex_to_rgb(value: str) -> tuple[int, int, int]:
-    value = value.lstrip("#")
-    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
-
-
-def render_claude_mark(
-    size: int, color: str = ACCENT, bg: str = BG_SOFT, samples: int = 4
-) -> tk.PhotoImage:
-    """Rasteriza o simbolo do Claude com antialiasing.
-
-    O Canvas do tkinter nao suaviza bordas, e um poligono de raios finos fica
-    serrilhado em tamanho pequeno. Aqui a forma e definida em coordenadas
-    polares -- uma rosacea, `r <= R * |cos(N*theta/2)|^p`, que produz os raios
-    em gota -- e cada pixel e amostrado numa grade `samples x samples` para
-    obter a cobertura, misturada com o fundo.
-
-    Vetorial de proposito: nenhum arquivo de marca acompanha o projeto, e o
-    desenho serve qualquer tamanho ou cor. O resultado fica em cache, porque
-    montar a imagem custa mais que exibi-la.
-    """
-    key = (size, color, bg, samples)
-    cached = _MARK_CACHE.get(key)
-    if cached is not None:
-        return cached
-
-    rays, sharpness = _mark_shape(size)
-    fg_r, fg_g, fg_b = _hex_to_rgb(color)
-    bg_r, bg_g, bg_b = _hex_to_rgb(bg)
-    center = size / 2
-    radius = center * 0.98
-    step = 1.0 / samples
-    total = samples * samples
-
-    rows = []
-    for py in range(size):
-        row = []
-        for px in range(size):
-            hits = 0
-            for sy in range(samples):
-                dy = py + (sy + 0.5) * step - center
-                for sx in range(samples):
-                    dx = px + (sx + 0.5) * step - center
-                    dist = math.hypot(dx, dy)
-                    if dist > radius:
-                        continue
-                    if dist < 1e-9:
-                        hits += 1
-                        continue
-                    angle = math.atan2(dy, dx)
-                    petal = abs(math.cos(rays * angle / 2)) ** sharpness
-                    if dist <= radius * petal:
-                        hits += 1
-            if not hits:
-                row.append(bg)
-                continue
-            alpha = hits / total
-            row.append(
-                "#%02x%02x%02x"
-                % (
-                    round(bg_r + (fg_r - bg_r) * alpha),
-                    round(bg_g + (fg_g - bg_g) * alpha),
-                    round(bg_b + (fg_b - bg_b) * alpha),
-                )
-            )
-        rows.append("{" + " ".join(row) + "}")
-
-    image = tk.PhotoImage(width=size, height=size)
-    image.put(" ".join(rows))
-    _MARK_CACHE[key] = image
-    return image
-
-
-class ClaudeMark(tk.Canvas):
-    """O simbolo do Claude como widget, para usar no cabecalho."""
-
-    def __init__(self, parent, size: int = 20, bg: str = BG_SOFT, color: str = ACCENT):
+    def __init__(self, parent, scale: int = 1, bg: str | None = None) -> None:
+        bg = bg or P["bg_soft"]
         super().__init__(
-            parent, width=size, height=size, bg=bg, highlightthickness=0, bd=0
+            parent, width=MASCOT_W * scale, height=MASCOT_H * scale,
+            bg=bg, highlightthickness=0, bd=0,
         )
         # A referencia precisa sobreviver: o tkinter nao segura PhotoImage.
-        self._image = render_claude_mark(size, color, bg)
+        self._image = render_mascot(scale, bg=bg)
         self.create_image(0, 0, image=self._image, anchor="nw")
 
 
 class Ring(tk.Canvas):
-    """Circulo do modo mini: anel de progresso com o percentual no centro."""
+    """Circulo do modo mini: mascote, percentual e anel de progresso."""
 
     def __init__(self, parent, size: int = RING_SIZE) -> None:
         super().__init__(
-            parent, width=size, height=size, bg=CHROMA,
-            highlightthickness=0, bd=0,
+            parent, width=size, height=size, bg=CHROMA, highlightthickness=0, bd=0
         )
-        self.size = size
         pad = 4
         box = (pad, pad, size - pad, size - pad)
 
-        # Disco de fundo, para o texto ter contraste sobre qualquer janela.
-        self.create_oval(1, 1, size - 1, size - 1, fill=BG, outline=BORDER)
-        # Trilho um pouco mais claro que o das barras: aqui ele fica sobre o
-        # disco escuro e precisa continuar visivel para dar a nocao de escala.
-        self._track = self.create_arc(
-            *box, start=90, extent=-359.9, style="arc", width=4, outline="#3b352d"
+        # Disco de fundo, para o conteudo ter contraste sobre qualquer janela.
+        self.create_oval(1, 1, size - 1, size - 1, fill=P["bg"], outline=P["border"])
+        self.create_arc(
+            *box, start=90, extent=-359.9, style="arc", width=4,
+            outline=P["ring_track"],
         )
         self._arc = self.create_arc(
-            *box, start=90, extent=0, style="arc", width=4, outline=OK
+            *box, start=90, extent=0, style="arc", width=4, outline=P["ok"]
         )
-        mark_size = int(size * 0.38)
-        self._mark = render_claude_mark(mark_size, ACCENT, BG)
-        self.create_image(size / 2, size * 0.33, image=self._mark, anchor="center")
+        self._mascot = render_mascot(1, bg=P["bg"])
+        self.create_image(size / 2, size * 0.34, image=self._mascot, anchor="center")
         self._value = self.create_text(
-            size / 2, size * 0.60, text="--", fill=FG,
+            size / 2, size * 0.63, text="--", fill=P["fg"],
             font=("Segoe UI", 11, "bold"),
         )
-        self._caption = self.create_text(
-            size / 2, size * 0.775, text="5h", fill=FG_FAINT,
+        self.create_text(
+            size / 2, size * 0.80, text="5h", fill=P["fg_faint"],
             font=("Segoe UI", 6),
         )
 
-    def set(
-        self,
-        pct: float | None,
-        caption: str = "5h",
-        estimated: bool = False,
-        value_text: str | None = None,
-        neutral: bool = False,
-    ) -> None:
+    def set(self, pct: float | None) -> None:
         if pct is None:
             self.itemconfigure(self._arc, extent=0)
-            self.itemconfigure(self._value, text=value_text or "--", fill=FG_FAINT)
-        else:
-            pct = min(max(pct, 0.0), 100.0)
-            color = NEUTRAL if neutral else level_color(pct)
-            # -0.1 evita o arco completo virar circulo fechado sem inicio visivel.
-            self.itemconfigure(self._arc, extent=-(pct * 3.599 or 0.1), outline=color)
-            text = value_text or f"{'~' if estimated else ''}{pct:.0f}%"
-            self.itemconfigure(
-                self._value, text=text, fill=FG_DIM if neutral else color
-            )
-        self.itemconfigure(self._caption, text=caption)
+            self.itemconfigure(self._value, text="--", fill=P["fg_faint"])
+            return
+        pct = min(max(pct, 0.0), 100.0)
+        color = level_color(pct)
+        # -0.1 evita o arco cheio virar circulo fechado sem inicio visivel.
+        self.itemconfigure(self._arc, extent=-(pct * 3.599 or 0.1), outline=color)
+        self.itemconfigure(self._value, text=f"{pct:.0f}%", fill=color)
 
 
 class Bar(tk.Canvas):
@@ -273,12 +117,16 @@ class Bar(tk.Canvas):
         # (378px) e estica o painel inteiro. O <Configure> cuida do resto.
         super().__init__(
             parent, height=self.HEIGHT, width=WIDTH - PAD * 2,
-            bg=BG, highlightthickness=0, bd=0,
+            bg=P["bg"], highlightthickness=0, bd=0,
         )
         self._pct = 0.0
-        self._color = OK
-        self._track = self.create_rectangle(0, 0, 0, self.HEIGHT, fill=TRACK, outline="")
-        self._fill = self.create_rectangle(0, 0, 0, self.HEIGHT, fill=OK, outline="")
+        self._color = P["ok"]
+        self._track = self.create_rectangle(
+            0, 0, 0, self.HEIGHT, fill=P["track"], outline=""
+        )
+        self._fill = self.create_rectangle(
+            0, 0, 0, self.HEIGHT, fill=P["ok"], outline=""
+        )
         self.bind("<Configure>", lambda _e: self._draw())
 
     def _draw(self) -> None:
@@ -300,17 +148,17 @@ class Meter(tk.Frame):
     """Titulo + percentual + barra + legenda: o bloco de uma janela de limite."""
 
     def __init__(self, parent, title: str) -> None:
-        super().__init__(parent, bg=BG)
-        head = tk.Frame(self, bg=BG)
+        super().__init__(parent, bg=P["bg"])
+        head = tk.Frame(self, bg=P["bg"])
         head.pack(fill="x")
 
         tk.Label(
-            head, text=title, bg=BG, fg=FG_DIM, anchor="w",
+            head, text=title, bg=P["bg"], fg=P["fg_dim"], anchor="w",
             font=("Segoe UI", 8, "bold"),
         ).pack(side="left")
 
         self.value = tk.Label(
-            head, text="--", bg=BG, fg=FG, anchor="e",
+            head, text="--", bg=P["bg"], fg=P["fg"], anchor="e",
             font=("Segoe UI", 12, "bold"),
         )
         self.value.pack(side="right")
@@ -320,32 +168,18 @@ class Meter(tk.Frame):
 
         # wraplength impede que uma legenda longa estique a largura do painel.
         self.caption = tk.Label(
-            self, text="", bg=BG, fg=FG_FAINT, anchor="w", justify="left",
+            self, text="", bg=P["bg"], fg=P["fg_faint"], anchor="w", justify="left",
             font=("Segoe UI", 8), wraplength=WIDTH - PAD * 2,
         )
         self.caption.pack(fill="x")
 
-    def update_values(
-        self,
-        pct: float | None,
-        caption: str,
-        estimated: bool = False,
-        value_text: str | None = None,
-        neutral: bool = False,
-    ) -> None:
-        """Atualiza o bloco.
-
-        `value_text` substitui o percentual no destaque -- usado quando a barra
-        mede tempo, e mostrar "96%" seria lido como consumo. `neutral` tira a
-        barra da escala verde/amarelo/vermelho pelo mesmo motivo.
-        """
+    def update_values(self, pct: float | None, caption: str) -> None:
         if pct is None:
-            self.value.configure(text=value_text or "--", fg=FG_FAINT)
+            self.value.configure(text="--", fg=P["fg_faint"])
             self.bar.set(0)
         else:
-            color = NEUTRAL if neutral else level_color(pct)
-            text = value_text or f"{'~' if estimated else ''}{pct:.0f}%"
-            self.value.configure(text=text, fg=FG_DIM if neutral else color)
+            color = level_color(pct)
+            self.value.configure(text=f"{pct:.0f}%", fg=color)
             self.bar.set(pct, color)
         self.caption.configure(text=caption)
 
@@ -354,30 +188,27 @@ class UsageWidget(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.cfg = Config.load()
+        self.theme = set_theme(self.cfg.theme)
         self.tz = local_timezone()
-        self.collector = Collector(history_days=self.cfg.history_days)
-        self.live = LiveState()
-        self.mode = self.cfg.mode if self.cfg.mode in MODES else "summary"
-        self._loading = True
+        self.live = read_state()
+        self.mode = self.cfg.mode if self.cfg.mode in MODES else "panel"
         self._drag = (0, 0)
         self._session_pct: float | None = None
-        self._session_estimated = False
-        self._session_text: str | None = None
-        self._session_neutral = False
         self._cli_busy = False
         self._cli_error: str | None = None
 
         self._setup_window()
         self._build()
         self._apply_mode(self.mode, save=False)
-        self.after(60, self._kick_refresh)
+        self.after(200, self._tick)
+        self.after(600, self._schedule_usage)
 
     # ------------------------------------------------------------- estrutura
 
     def _setup_window(self) -> None:
         self.title("Uso do Claude Code")
         self.overrideredirect(True)  # sem barra de titulo do sistema
-        self.configure(bg=BG)
+        self.configure(bg=P["bg"])
         self.attributes("-topmost", self.cfg.always_on_top)
         try:
             self.attributes("-alpha", self.cfg.opacity)
@@ -390,7 +221,6 @@ class UsageWidget(tk.Tk):
     def _build(self) -> None:
         self.container = tk.Frame(self, bg=CHROMA)
         self.container.pack(fill="both", expand=True)
-
         self._build_ring()
         self._build_panel()
         self._build_menu()
@@ -407,68 +237,54 @@ class UsageWidget(tk.Tk):
 
     def _build_panel(self) -> None:
         # Borda de 1px: frame externo colorido com o conteudo por dentro.
-        self.panel = tk.Frame(self.container, bg=BORDER)
-        root = tk.Frame(self.panel, bg=BG)
+        self.panel = tk.Frame(self.container, bg=P["border"])
+        root = tk.Frame(self.panel, bg=P["bg"])
         root.pack(fill="both", expand=True, padx=1, pady=1)
-        self.panel_root = root
         # Espacador de altura zero: fixa a largura do painel sem impedir que o
         # frame calcule a propria altura a partir dos filhos.
-        tk.Frame(root, bg=BG, width=WIDTH, height=0).pack()
+        tk.Frame(root, bg=P["bg"], width=WIDTH, height=0).pack()
 
-        # ---- cabecalho
-        header = tk.Frame(root, bg=BG_SOFT, height=30)
+        header = tk.Frame(root, bg=P["bg_soft"], height=32)
         header.pack(fill="x")
         header.pack_propagate(False)
         self.header = header
 
-        self.dot = ClaudeMark(header, size=20)
-        self.dot.pack(side="left", padx=(PAD - 2, 6))
+        self.dot = Mascot(header, scale=1)
+        self.dot.pack(side="left", padx=(PAD - 2, 7))
         self.heading = tk.Label(
-            header, text="CLAUDE CODE", bg=BG_SOFT, fg=FG, font=("Segoe UI", 8, "bold")
+            header, text="CLAUDE CODE", bg=P["bg_soft"], fg=P["fg"],
+            font=("Segoe UI", 8, "bold"),
         )
         self.heading.pack(side="left")
 
-        self._header_button(header, "✕", self.quit_widget, CRIT, pad=(4, PAD - 5))
-        self._header_button(header, "⋮", self._show_menu_at_button, ACCENT)
-        self._header_button(header, "–", lambda: self._apply_mode("mini"), ACCENT)
+        self._header_button(header, "✕", self.quit_widget, P["crit"], pad=(4, PAD - 5))
+        self._header_button(header, "⋮", self._show_menu_at_button, P["accent"])
+        self._header_button(header, "–", lambda: self._apply_mode("mini"), P["accent"])
 
         self.source_badge = tk.Label(
-            header, text="", bg=BG_SOFT, fg=FG_FAINT, font=("Segoe UI", 7)
+            header, text="", bg=P["bg_soft"], fg=P["fg_faint"], font=("Segoe UI", 7)
         )
         self.source_badge.pack(side="right", padx=(0, 8))
 
-        # ---- corpo
-        body = tk.Frame(root, bg=BG)
+        body = tk.Frame(root, bg=P["bg"])
         body.pack(fill="both", expand=True, padx=PAD, pady=(12, 4))
 
         self.session_meter = Meter(body, "SESSÃO ATUAL")
         self.session_meter.pack(fill="x")
 
         self.week_meter = Meter(body, "SEMANA")
-        self.week_meter.pack(fill="x", pady=(12, 0))
-
-        # ---- blocos exclusivos do modo completo
-        self.full_only = tk.Frame(body, bg=BG)
-
-        tk.Frame(self.full_only, bg=BORDER, height=1).pack(fill="x", pady=(13, 10))
-
-        stats = tk.Frame(self.full_only, bg=BG)
-        stats.pack(fill="x")
-        self.tokens_label = self._stat(stats, "left", "tokens")
-        self.cost_label = self._stat(stats, "right", "valor estimado")
-
-        self.projects_frame = tk.Frame(self.full_only, bg=BG)
+        self.week_meter.pack(fill="x", pady=(13, 0))
 
         self.footer = tk.Label(
-            root, text="carregando…", bg=BG, fg=FG_FAINT, anchor="w",
-            justify="left", font=("Segoe UI", 7), wraplength=WIDTH - PAD * 2,
+            root, text="", bg=P["bg"], fg=P["fg_faint"], anchor="w", justify="left",
+            font=("Segoe UI", 7), wraplength=WIDTH - PAD * 2,
         )
 
         for widget in (header, self.dot, self.heading):
             widget.bind("<Button-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
             widget.bind("<ButtonRelease-1>", self._drag_end)
-            widget.bind("<Double-Button-1>", lambda _e: self._toggle_detail())
+            widget.bind("<Double-Button-1>", lambda _e: self._apply_mode("mini"))
 
         self.panel.bind("<Button-3>", self._show_menu)
         root.bind("<Button-3>", self._show_menu)
@@ -476,61 +292,54 @@ class UsageWidget(tk.Tk):
 
     def _header_button(self, parent, text, command, hover, pad=(4, 2)):
         btn = tk.Label(
-            parent, text=text, bg=BG_SOFT, fg=FG_FAINT,
+            parent, text=text, bg=P["bg_soft"], fg=P["fg_faint"],
             font=("Segoe UI", 10), cursor="hand2",
         )
         btn.pack(side="right", padx=pad)
-        btn.bind("<Button-1>", lambda e: command(e) if _wants_event(command) else command())
-        btn.bind("<Enter>", lambda _e: btn.configure(fg=hover))
-        btn.bind("<Leave>", lambda _e: btn.configure(fg=FG_FAINT))
-        return btn
-
-    def _stat(self, parent, side: str, caption: str):
-        holder = tk.Frame(parent, bg=BG)
-        holder.pack(side=side)
-        anchor = "w" if side == "left" else "e"
-        value = tk.Label(
-            holder, text="--", bg=BG, fg=FG, anchor=anchor, font=("Segoe UI", 13, "bold")
+        btn.bind(
+            "<Button-1>",
+            lambda e: command(e) if _wants_event(command) else command(),
         )
-        value.pack(anchor=anchor)
-        tk.Label(
-            holder, text=caption, bg=BG, fg=FG_FAINT, anchor=anchor, font=("Segoe UI", 7)
-        ).pack(anchor=anchor)
-        return value
+        btn.bind("<Enter>", lambda _e: btn.configure(fg=hover))
+        btn.bind("<Leave>", lambda _e: btn.configure(fg=P["fg_faint"]))
+        return btn
 
     def _build_menu(self) -> None:
         self.menu = tk.Menu(
-            self, tearoff=0, bg=BG_SOFT, fg=FG, activebackground=ACCENT,
-            activeforeground="#1a1613", bd=0, font=("Segoe UI", 9),
+            self, tearoff=0, bg=P["bg_soft"], fg=P["fg"], activebackground=P["accent"],
+            activeforeground=P["menu_fg"], bd=0, font=("Segoe UI", 9),
         )
         self.var_mode = tk.StringVar(value=self.mode)
+        self.var_theme = tk.StringVar(value=self.cfg.theme)
         self.var_top = tk.BooleanVar(value=self.cfg.always_on_top)
-        self.var_projects = tk.BooleanVar(value=self.cfg.show_projects)
 
-        for label, value in (
-            ("Minimizado", "mini"),
-            ("Resumo", "summary"),
-            ("Completo", "full"),
-        ):
+        for label, value in (("Minimizado", "mini"), ("Painel", "panel")):
             self.menu.add_radiobutton(
                 label=label, value=value, variable=self.var_mode,
                 command=lambda v=value: self._apply_mode(v),
             )
         self.menu.add_separator()
-        self.menu.add_command(label="Atualizar agora", command=self._kick_refresh)
-        self.menu.add_command(
-            label="Buscar % oficial (/usage)", command=self._kick_usage_cli
+        self.menu.add_command(label="Atualizar agora", command=self._kick_usage_cli)
+
+        theme_menu = tk.Menu(
+            self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
+            activebackground=P["accent"], activeforeground=P["menu_fg"],
         )
+        for label, value in (
+            ("Do sistema", "auto"), ("Claro", "light"), ("Escuro", "dark")
+        ):
+            theme_menu.add_radiobutton(
+                label=label, value=value, variable=self.var_theme,
+                command=lambda v=value: self._apply_theme(v),
+            )
+        self.menu.add_cascade(label="Tema", menu=theme_menu)
+
         self.menu.add_checkbutton(
             label="Sempre visível", variable=self.var_top, command=self._toggle_top
         )
-        self.menu.add_checkbutton(
-            label="Mostrar projetos", variable=self.var_projects,
-            command=self._toggle_projects,
-        )
         opacity = tk.Menu(
-            self.menu, tearoff=0, bg=BG_SOFT, fg=FG,
-            activebackground=ACCENT, activeforeground="#1a1613",
+            self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
+            activebackground=P["accent"], activeforeground=P["menu_fg"],
         )
         for label, value in (("100%", 1.0), ("96%", 0.96), ("85%", 0.85), ("70%", 0.70)):
             opacity.add_command(label=label, command=lambda v=value: self._set_opacity(v))
@@ -542,32 +351,44 @@ class UsageWidget(tk.Tk):
 
     def _apply_mode(self, mode: str, save: bool = True) -> None:
         if mode not in MODES:
-            mode = "summary"
+            mode = "panel"
         self.mode = mode
         self.var_mode.set(mode)
 
         self.ring_holder.pack_forget()
         self.panel.pack_forget()
-        self.full_only.pack_forget()
         self.footer.pack_forget()
 
         if mode == "mini":
             self.container.configure(bg=CHROMA)
             self.ring_holder.pack()
         else:
-            self.container.configure(bg=BG)
+            self.container.configure(bg=P["bg"])
             self.panel.pack(fill="both", expand=True)
-            if mode == "full":
-                self.full_only.pack(fill="x")
-                self.footer.pack(fill="x", padx=PAD, pady=(8, 7))
-            else:
-                self.footer.pack(fill="x", padx=PAD, pady=(10, 8))
+            self.footer.pack(fill="x", padx=PAD, pady=(10, 8))
 
         self._resize()
         if save:
             self.cfg.mode = mode
             self.cfg.save()
         self._render()
+
+    def _apply_theme(self, name: str) -> None:
+        """Troca a paleta reconstruindo a interface.
+
+        Reconfigurar dezenas de widgets um a um deixaria cores esquecidas para
+        tras; recriar o conteudo garante que tudo siga a paleta nova.
+        """
+        self.cfg.theme = name
+        self.cfg.save()
+        self.theme = set_theme(name)
+
+        position = (self.winfo_x(), self.winfo_y())
+        self.container.destroy()
+        self.configure(bg=P["bg"])
+        self._build()
+        self._apply_mode(self.mode, save=False)
+        self.geometry(f"+{position[0]}+{position[1]}")
 
     def _resize(self) -> None:
         """Reajusta a janela ao conteudo do modo atual.
@@ -578,12 +399,6 @@ class UsageWidget(tk.Tk):
         self.update_idletasks()
         self.geometry("")
         self.update_idletasks()
-
-    def _toggle_detail(self) -> None:
-        self._apply_mode("full" if self.mode == "summary" else "summary")
-
-    def _cycle_mode(self) -> None:
-        self._apply_mode(MODES[(MODES.index(self.mode) + 1) % len(MODES)])
 
     # ---------------------------------------------------------- interacoes
 
@@ -603,12 +418,12 @@ class UsageWidget(tk.Tk):
         self._drag_origin = (event.x_root, event.y_root)
 
     def _ring_release(self, event) -> None:
-        """Clique sem arrastar abre o resumo; arrastar so reposiciona."""
+        """Clique sem arrastar abre o painel; arrastar so reposiciona."""
         origin = getattr(self, "_drag_origin", (event.x_root, event.y_root))
         moved = abs(event.x_root - origin[0]) + abs(event.y_root - origin[1])
         self._drag_end()
         if moved < 5:
-            self._apply_mode("summary")
+            self._apply_mode("panel")
 
     def _show_menu(self, event) -> None:
         try:
@@ -630,12 +445,6 @@ class UsageWidget(tk.Tk):
         self.attributes("-topmost", self.cfg.always_on_top)
         self.cfg.save()
 
-    def _toggle_projects(self) -> None:
-        self.cfg.show_projects = self.var_projects.get()
-        self.cfg.save()
-        self._render()
-        self._resize()
-
     def _set_opacity(self, value: float) -> None:
         self.cfg.opacity = value
         try:
@@ -652,21 +461,33 @@ class UsageWidget(tk.Tk):
 
     # ------------------------------------------------------------ atualizacao
 
-    def _kick_refresh(self, _event=None) -> None:
-        """Dispara a coleta numa thread, para a interface nunca congelar."""
-        threading.Thread(target=self._refresh_worker, daemon=True).start()
+    def _tick(self) -> None:
+        """Redesenha periodicamente, para o tempo ate o reset ficar correndo."""
+        self.live = read_state()
+        self._render()
+        self.after(max(self.cfg.refresh_seconds, 5) * 1000, self._tick)
+
+    def _schedule_usage(self) -> None:
+        """Consulta o /usage se o dado estiver velho, e reagenda."""
+        minutes = max(int(self.cfg.usage_refresh_minutes or 0), 0)
+        if not minutes:
+            return
+        if self.live.age_seconds > minutes * 60:
+            self._kick_usage_cli()
+        self.after(minutes * 60_000, self._schedule_usage)
 
     def _kick_usage_cli(self) -> None:
         """Busca os percentuais rodando `claude -p /usage` numa thread.
 
-        Alternativa a status line para contas que nao recebem `rate_limits`
-        (Team, por exemplo). Leva alguns segundos, por isso e sob demanda.
+        E a unica fonte de dados do widget. O comando e local -- nao ha
+        resposta de modelo, entao nao consome tokens -- mas leva alguns
+        segundos para o CLI iniciar, por isso nunca roda no laco da interface.
         """
         if self._cli_busy:
             return
         self._cli_busy = True
         self._cli_error = None
-        self.footer.configure(text="consultando /usage…")
+        self._render_footer()
         threading.Thread(target=self._usage_cli_worker, daemon=True).start()
 
     def _usage_cli_worker(self) -> None:
@@ -679,189 +500,76 @@ class UsageWidget(tk.Tk):
         finally:
             self._cli_busy = False
         try:
-            self.after(0, self._kick_refresh)
+            self.after(0, self._refresh_now)
         except RuntimeError:
             pass  # janela ja fechada
 
-    def _refresh_worker(self) -> None:
-        try:
-            self.collector.refresh()
-            self.collector.prune()
-            self.live = read_state()
-        except Exception:  # o widget nunca deve morrer por causa de um refresh
-            pass
-        self._loading = False
-        try:
-            self.after(0, self._render)
-            self.after(self.cfg.refresh_seconds * 1000, self._kick_refresh)
-        except RuntimeError:
-            pass  # janela ja fechada
+    def _refresh_now(self) -> None:
+        self.live = read_state()
+        self._render()
 
     def _render(self) -> None:
-        now = datetime.now(timezone.utc)
-        self._render_session(now)
+        self._render_session()
         self._render_week()
         if self.mode == "mini":
-            self.ring.set(
-                self._session_pct,
-                "restam" if self._session_neutral else "5h",
-                self._session_estimated,
-                value_text=self._session_text,
-                neutral=self._session_neutral,
-            )
-            return
-        if self.mode == "full":
-            self._render_details(now)
-        self._render_footer()
-
-    def _render_session(self, now) -> None:
-        official = self.live.five_hour
-        if official is not None and official.expired:
-            official = None
-
-        if official is not None:
-            self._session_pct = official.used_percentage
-            self._session_estimated = False
-            self._session_text = None
-            self._session_neutral = False
-            remaining = fmt_duration(official.remaining_seconds())
-            caption = f"Reinicia em {remaining}"
-            if official.resets_at:
-                clock = datetime.fromtimestamp(official.resets_at, tz=self.tz)
-                caption += f" · {clock:%H:%M}"
-            self.session_meter.update_values(official.used_percentage, caption)
-            return
-
-        block = current_block(
-            self.collector.requests, now=now, anchor=self.cfg.block_anchor_dt()
-        )
-        if block is not None:
-            # Sem numero oficial nao ha como saber o consumo. Mostramos o tempo
-            # restante da janela, que e verificavel, e deixamos a barra neutra:
-            # exibir "96%" aqui seria lido como 96% do limite consumido.
-            elapsed = block.elapsed_fraction(now) * 100
-            remaining_seconds = int(block.remaining(now).total_seconds())
-            reset_local = block.end.astimezone(self.tz)
-            self._session_pct = elapsed
-            self._session_estimated = True
-            self._session_text = fmt_duration_short(remaining_seconds)
-            self._session_neutral = True
-            self.session_meter.update_values(
-                elapsed,
-                f"Restam nesta janela · ~reinicia {reset_local:%H:%M}\n"
-                f"% de consumo indisponível sem a status line",
-                value_text=fmt_duration(remaining_seconds),
-                neutral=True,
-            )
+            self.ring.set(self._session_pct)
         else:
+            self._render_footer()
+
+    def _render_session(self) -> None:
+        window = self.live.five_hour
+        if window is not None and window.expired:
+            window = None
+
+        if window is None:
             self._session_pct = None
-            self._session_estimated = False
-            self._session_text = None
-            self._session_neutral = False
-            self.session_meter.update_values(None, "Nenhuma sessão ativa")
+            self.session_meter.update_values(None, "Sem dado · menu › Atualizar agora")
+            return
+
+        self._session_pct = window.used_percentage
+        caption = f"Reinicia em {fmt_duration(window.remaining_seconds())}"
+        if window.resets_at:
+            clock = datetime.fromtimestamp(window.resets_at, tz=self.tz)
+            caption += f" · {clock:%H:%M}"
+        self.session_meter.update_values(window.used_percentage, caption)
 
     def _render_week(self) -> None:
-        week = self.live.seven_day
-        if week is not None and week.expired:
-            week = None
+        window = self.live.seven_day
+        if window is not None and window.expired:
+            window = None
 
-        if week is None:
-            self.week_meter.update_values(
-                None, "Sem dado oficial · menu › Buscar % oficial"
-            )
+        if window is None:
+            self.week_meter.update_values(None, "Sem dado")
             return
 
         caption = "Todos os modelos"
-        if week.resets_at:
-            clock = datetime.fromtimestamp(week.resets_at, tz=self.tz)
-            dias = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
-            caption = (
-                f"Reinicia {dias[clock.weekday()]} {clock:%d/%m} · {clock:%H:%M}"
-            )
-        self.week_meter.update_values(week.used_percentage, caption)
-
-    def _render_details(self, now) -> None:
-        block = current_block(
-            self.collector.requests, now=now, anchor=self.cfg.block_anchor_dt()
-        )
-        if block is not None:
-            self.tokens_label.configure(text=fmt_tokens(block.totals.total_tokens))
-            self.cost_label.configure(text=fmt_money(block.totals.cost))
-        else:
-            self.tokens_label.configure(text="--")
-            self.cost_label.configure(text="--")
-        self._render_projects(now)
-
-    def _render_projects(self, now) -> None:
-        for row in self.projects_frame.winfo_children():
-            row.destroy()
-
-        if not self.cfg.show_projects:
-            self.projects_frame.pack_forget()
-            return
-
-        start, end = week_period(self.cfg.weekly_anchor_dt(), now)
-        if self.live.seven_day and self.live.seven_day.resets_at:
-            # Alinha a lista ao periodo semanal oficial, quando ele e conhecido.
-            end = datetime.fromtimestamp(self.live.seven_day.resets_at, tz=timezone.utc)
-            start = end - timedelta(days=7)
-
-        top = group_by(self.collector.requests, "project", start, end, limit=3)
-        if not top:
-            self.projects_frame.pack_forget()
-            return
-
-        self.projects_frame.pack(fill="x", pady=(12, 0))
-        tk.Label(
-            self.projects_frame, text="PROJETOS · SEMANA", bg=BG, fg=FG_FAINT,
-            anchor="w", font=("Segoe UI", 7, "bold"),
-        ).pack(fill="x", pady=(0, 5))
-
-        peak = max((t.cost for _, t in top), default=0.0) or 1.0
-        share_width = 44
-        for name, totals in top:
-            row = tk.Frame(self.projects_frame, bg=BG)
-            row.pack(fill="x", pady=1)
-            tk.Label(
-                row, text=name[:20], bg=BG, fg=FG_DIM, anchor="w", font=("Segoe UI", 8)
-            ).pack(side="left")
-            tk.Label(
-                row, text=fmt_money(totals.cost), bg=BG, fg=FG_DIM, anchor="e",
-                font=("Segoe UI", 8), width=9,
-            ).pack(side="right")
-            # Barra proporcional ao maior da lista, so como apoio de leitura.
-            share = tk.Canvas(
-                row, height=3, width=share_width, bg=BG, highlightthickness=0, bd=0
-            )
-            share.pack(side="right", padx=(6, 4))
-            filled = max(int(share_width * totals.cost / peak), 2)
-            share.create_rectangle(
-                share_width - filled, 0, share_width, 3, fill=BORDER, outline=""
-            )
+        if window.resets_at:
+            clock = datetime.fromtimestamp(window.resets_at, tz=self.tz)
+            caption = f"Reinicia {DAYS[clock.weekday()]} {clock:%d/%m} · {clock:%H:%M}"
+        self.week_meter.update_values(window.used_percentage, caption)
 
     def _render_footer(self) -> None:
-        if self._loading:
-            self.footer.configure(text="carregando…")
-            return
         if self._cli_busy:
+            self.source_badge.configure(text="…", fg=P["fg_faint"])
             self.footer.configure(text="consultando /usage…")
             return
         if self._cli_error:
+            self.source_badge.configure(text="erro", fg=P["crit"])
             self.footer.configure(text=f"/usage falhou: {self._cli_error}")
             return
+        if not self.live.available:
+            self.source_badge.configure(text="sem dado", fg=P["fg_faint"])
+            self.footer.configure(text="nenhuma consulta ao /usage ainda")
+            return
 
-        if self.live.available and not self.live.stale:
-            self.source_badge.configure(text="oficial", fg=OK)
-            age = int(self.live.age_seconds)
-            origem = "sincronizado agora" if age < 60 else f"sincronizado há {fmt_duration(age)}"
-        elif self.live.available:
-            self.source_badge.configure(text="cache", fg=WARN)
-            origem = f"status line parada há {fmt_duration(int(self.live.age_seconds))}"
-        else:
-            self.source_badge.configure(text="local", fg=FG_FAINT)
-            origem = "estimado dos logs locais"
-
-        self.footer.configure(text=f"{origem} · {self.live.model or '-'}")
+        age = int(self.live.age_seconds)
+        stale = self.live.stale
+        self.source_badge.configure(
+            text="antigo" if stale else "oficial",
+            fg=P["warn"] if stale else P["ok"],
+        )
+        quando = "agora" if age < 60 else f"há {fmt_duration(age)}"
+        self.footer.configure(text=f"/usage consultado {quando}")
 
 
 def _wants_event(func) -> bool:

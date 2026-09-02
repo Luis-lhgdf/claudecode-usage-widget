@@ -1,144 +1,87 @@
 """Ponto de entrada.
 
-    python -m ccwidget            abre o widget flutuante
-    python -m ccwidget report     imprime o mesmo resumo no terminal
-    python -m ccwidget usage      busca os % oficiais via `claude -p /usage`
-    python -m ccwidget statusline usado pelo Claude Code (le JSON do stdin)
+    python -m ccwidget          abre o widget flutuante
+    python -m ccwidget usage    consulta o /usage e grava para o widget
+    python -m ccwidget report   imprime os percentuais no terminal
 """
 
 from __future__ import annotations
 
 import sys
 
+LABELS = {
+    "five_hour": "Sessão",
+    "seven_day": "Semana",
+    "fable_week": "Semana (Fable)",
+}
+
+
+def _bar(pct: float, width: int = 28) -> str:
+    filled = int(round(min(max(pct, 0), 100) / 100 * width))
+    return "█" * filled + "░" * (width - filled)
+
 
 def _report() -> None:
-    """Resumo em texto: util para conferir os numeros sem abrir a janela."""
-    from datetime import datetime, timedelta, timezone
+    """Os mesmos numeros do widget, sem abrir janela."""
+    from datetime import datetime
 
-    from .analytics import current_block, group_by, totals_between, week_period
-    from .collector import Collector
-    from .config import Config, local_timezone
+    from .config import local_timezone
     from .state import read_state
 
-    cfg = Config.load()
     tz = local_timezone()
-    collector = Collector(history_days=cfg.history_days)
-    collector.refresh()
     live = read_state()
-    now = datetime.now(timezone.utc)
-
-    def bar(pct: float, width: int = 28) -> str:
-        filled = int(round(min(max(pct, 0), 100) / 100 * width))
-        return "█" * filled + "░" * (width - filled)
 
     print()
     print("  USO DO CLAUDE CODE")
     print("  " + "─" * 46)
 
-    # Sessao de 5 horas
-    five = live.five_hour if live.five_hour and not live.five_hour.expired else None
-    if five:
-        reset = (
-            datetime.fromtimestamp(five.resets_at, tz=tz).strftime("%H:%M")
-            if five.resets_at
-            else "--"
-        )
-        print(f"  Sessão    {bar(five.used_percentage)} {five.used_percentage:5.1f}%")
-        print(f"            reinicia {reset}")
-    else:
-        print("  Sessão    (sem dado oficial — instale a status line)")
+    if not live.available:
+        print("  Nenhuma consulta ainda — rode: python -m ccwidget usage")
+        print()
+        return
 
-    # Semana
-    week = live.seven_day if live.seven_day and not live.seven_day.expired else None
-    if week:
-        reset = (
-            datetime.fromtimestamp(week.resets_at, tz=tz).strftime("%a %d/%m %H:%M")
-            if week.resets_at
-            else "--"
-        )
-        print(f"  Semana    {bar(week.used_percentage)} {week.used_percentage:5.1f}%")
-        print(f"            reinicia {reset}")
-
-    # Bloco atual pelos logs locais
-    block = current_block(collector.requests, now=now, anchor=cfg.block_anchor_dt())
-    print("  " + "─" * 46)
-    if block:
+    for window, label in ((live.five_hour, "Sessão"), (live.seven_day, "Semana")):
+        if window is None or window.expired:
+            continue
         print(
-            f"  Bloco 5h  {block.totals.requests} reqs · "
-            f"{block.totals.total_tokens:,} tokens · "
-            f"~${block.totals.cost:,.2f} equivalente"
+            f"  {label:<9} {_bar(window.used_percentage)}"
+            f" {window.used_percentage:5.1f}%"
         )
-        print(
-            f"            inicio {block.start.astimezone(tz):%H:%M} · "
-            f"reset ~{block.end.astimezone(tz):%H:%M}"
-        )
-    else:
-        print("  Bloco 5h  nenhuma sessao ativa")
-
-    # Semana pelos logs
-    if week and week.resets_at:
-        end = datetime.fromtimestamp(week.resets_at, tz=timezone.utc)
-        start = end - timedelta(days=7)
-    else:
-        start, end = week_period(cfg.weekly_anchor_dt(), now)
-    totals = totals_between(collector.requests, start, end)
-    print(
-        f"  Semana    {totals.requests} reqs · "
-        f"{totals.total_tokens:,} tokens · ~${totals.cost:,.2f} equivalente"
-    )
-
-    top = group_by(collector.requests, "project", start, end, limit=5)
-    if top:
-        print("  " + "─" * 46)
-        print("  Projetos (semana)")
-        for name, t in top:
-            print(f"    {name[:28]:<28} ~${t.cost:>8,.2f}")
-
-    models = group_by(collector.requests, "model", start, end, limit=5)
-    if models:
-        print("  Modelos (semana)")
-        for name, t in models:
-            print(f"    {name[:28]:<28} ~${t.cost:>8,.2f}")
+        if window.resets_at:
+            clock = datetime.fromtimestamp(window.resets_at, tz=tz)
+            print(f"            reinicia {clock:%d/%m %H:%M}")
 
     print("  " + "─" * 46)
-    if live.available:
-        origem = "status line" + (" (dado antigo)" if live.stale else "")
-    else:
-        origem = "apenas logs locais"
-    print(f"  Percentuais: {origem}")
-    print(
-        "  Valores com ~ sao estimativas de equivalente API, "
-        "nao cobranca real.\n"
-    )
+    idade = int(live.age_seconds)
+    quando = "agora" if idade < 60 else f"há {idade // 60} min"
+    print(f"  /usage consultado {quando}{' (dado antigo)' if live.stale else ''}")
+    print()
+
+
+def _usage() -> None:
+    from .usage_cli import refresh_state
+
+    try:
+        limits = refresh_state()
+    except RuntimeError as exc:
+        print(f"  falhou: {exc}")
+        raise SystemExit(1)
+
+    print()
+    for key, window in limits.items():
+        print(f"  {LABELS.get(key, key):<15} {window['used_percentage']:5.1f}%")
+    print()
+    print("  gravado em ~/.ccwidget/state.json")
+    print()
 
 
 def main() -> None:
-    argv = sys.argv[1:]
-    command = argv[0] if argv else ""
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
 
-    if command == "statusline":
-        from .statusline import main as statusline_main
-
-        statusline_main()
-    elif command == "report":
+    if command == "report":
         _report()
     elif command == "usage":
-        from .usage_cli import refresh_state
-
-        try:
-            limits = refresh_state()
-        except RuntimeError as exc:
-            print(f"  falhou: {exc}")
-            raise SystemExit(1)
-        rotulos = {
-            "five_hour": "Sessão", "seven_day": "Semana", "fable_week": "Semana (Fable)"
-        }
-        print()
-        for key, window in limits.items():
-            print(f"  {rotulos.get(key, key):<15} {window['used_percentage']:5.1f}%")
-        print()
-        print("  gravado em ~/.ccwidget/state.json")
-        print()
+        _usage()
     elif command in ("-h", "--help", "help"):
         print(__doc__)
     else:
