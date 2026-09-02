@@ -93,14 +93,17 @@ class Ring(tk.Canvas):
         self._image = render_ring(size, None, P["ok"])
         self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
 
+        # Alturas em fracao do diametro. O percentual e a hora ficam separados
+        # por 31% -- os 19% que davam o espacamento minimo mais 12% de folga,
+        # para a hora nao encostar no numero grande.
         self._mascot = render_mascot(1, bg=P["bg"])
-        self.create_image(size / 2, size * 0.30, image=self._mascot, anchor="center")
+        self.create_image(size / 2, size * 0.24, image=self._mascot, anchor="center")
         self._value = self.create_text(
-            size / 2, size * 0.545, text="--", fill=P["fg"],
+            size / 2, size * 0.47, text="--", fill=P["fg"],
             font=("Segoe UI", 12, "bold"),
         )
         self._reset = self.create_text(
-            size / 2, size * 0.735, text="", fill=P["fg_faint"],
+            size / 2, size * 0.78, text="", fill=P["fg_faint"],
             font=("Segoe UI", 7),
         )
 
