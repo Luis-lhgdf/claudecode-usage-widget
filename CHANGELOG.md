@@ -3,6 +3,17 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.2.0] — 2026-09-02
+
+### Adicionado
+
+- Cópia única: clicar no atalho com o widget já aberto não abre uma segunda
+  janela. A cópia em execução vem para frente, e volta para a tela principal se
+  estava numa posição que deixou de existir (monitor desconectado).
+- Controle de opacidade contínuo, de 1% a 100%, no lugar dos quatro valores
+  fixos. A janelinha do controle fica sempre opaca, para ser possível desfazer
+  um ajuste que tenha deixado o widget quase invisível.
+
 ## [0.1.1] — 2026-09-02
 
 ### Corrigido

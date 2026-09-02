@@ -420,3 +420,39 @@ def render_bar_loading(
     image.put(" ".join(rows))
     _SHAPE_CACHE[key] = image
     return image
+
+
+def render_dot(size: int, color: str, bg: str, samples: int = 4) -> tk.PhotoImage:
+    """Disco cheio, suavizado. Usado como pegador do controle de opacidade."""
+    key = ("dot", size, color, bg, samples)
+    cached = _SHAPE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    import math
+
+    centro = size / 2
+    raio = centro - 0.5
+    fg = _hex_to_rgb(color)
+    fundo = _hex_to_rgb(bg)
+    step = 1.0 / samples
+    total = samples * samples
+
+    rows = []
+    for py in range(size):
+        row = []
+        for px in range(size):
+            dentro = 0
+            for sy in range(samples):
+                dy = py + (sy + 0.5) * step - centro
+                for sx in range(samples):
+                    dx = px + (sx + 0.5) * step - centro
+                    if math.hypot(dx, dy) <= raio:
+                        dentro += 1
+            row.append(bg if not dentro else _blend(fg, fundo, dentro / total))
+        rows.append("{" + " ".join(row) + "}")
+
+    image = tk.PhotoImage(width=size, height=size)
+    image.put(" ".join(rows))
+    _SHAPE_CACHE[key] = image
+    return image

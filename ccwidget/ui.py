@@ -23,6 +23,7 @@ from datetime import datetime
 
 from . import __version__
 from .config import Config, local_timezone
+from .single_instance import serve
 from .state import read_state
 from .theme import (
     CHROMA,
@@ -32,6 +33,7 @@ from .theme import (
     level_color,
     render_bar,
     render_bar_loading,
+    render_dot,
     render_mascot,
     render_ring,
     set_theme,
@@ -178,6 +180,60 @@ class Bar(tk.Canvas):
         self.itemconfigure(self._image_id, image=self._image)
 
 
+class Slider(tk.Canvas):
+    """Controle deslizante desenhado a mao, no mesmo acabamento das barras."""
+
+    ALTURA = 18
+    PEGADOR = 14
+
+    def __init__(self, parent, largura: int, valor: int, minimo: int, maximo: int,
+                 ao_mudar) -> None:
+        super().__init__(
+            parent, width=largura, height=self.ALTURA,
+            bg=P["bg"], highlightthickness=0, bd=0, cursor="hand2",
+        )
+        self.largura = largura
+        self.minimo = minimo
+        self.maximo = maximo
+        self.valor = valor
+        self.ao_mudar = ao_mudar
+
+        # A trilha nao chega as bordas: o pegador precisa de espaco para nao
+        # ser cortado nos extremos.
+        self.margem = self.PEGADOR // 2
+        self.trilha_larg = largura - self.PEGADOR
+        self._trilha = render_bar(self.trilha_larg, 6, 0, P["accent"])
+        self._trilha_id = self.create_image(
+            self.margem, self.ALTURA / 2, image=self._trilha, anchor="w"
+        )
+        self._dot = render_dot(self.PEGADOR, P["accent"], P["bg"])
+        self._dot_id = self.create_image(0, self.ALTURA / 2, image=self._dot, anchor="center")
+
+        self.bind("<Button-1>", self._mover)
+        self.bind("<B1-Motion>", self._mover)
+        self._desenhar()
+
+    def _fracao(self) -> float:
+        return (self.valor - self.minimo) / max(self.maximo - self.minimo, 1)
+
+    def _desenhar(self) -> None:
+        fracao = self._fracao()
+        self._trilha = render_bar(self.trilha_larg, 6, fracao * 100, P["accent"])
+        self.itemconfigure(self._trilha_id, image=self._trilha)
+        self.coords(
+            self._dot_id, self.margem + fracao * self.trilha_larg, self.ALTURA / 2
+        )
+
+    def _mover(self, event) -> None:
+        fracao = (event.x - self.margem) / max(self.trilha_larg, 1)
+        fracao = min(max(fracao, 0.0), 1.0)
+        novo = round(self.minimo + fracao * (self.maximo - self.minimo))
+        if novo != self.valor:
+            self.valor = novo
+            self._desenhar()
+            self.ao_mudar(novo)
+
+
 class Meter(tk.Frame):
     """Titulo + percentual + barra + legenda: o bloco de uma janela de limite."""
 
@@ -223,8 +279,14 @@ class Meter(tk.Frame):
 
 
 class UsageWidget(tk.Tk):
-    def __init__(self) -> None:
+    def __init__(self, instancia: object = None) -> None:
         super().__init__()
+        # Socket reservado por single_instance: fica guardado para ser fechado
+        # no fim e para atender os pedidos das outras copias.
+        self._instancia = instancia
+        self._pedido_foco = False
+        self._popup_opacidade = None
+        self._popup_opacidade = None
         self.cfg = Config.load()
         self.theme = set_theme(self.cfg.theme)
         self.tz = local_timezone()
@@ -241,7 +303,10 @@ class UsageWidget(tk.Tk):
         self._setup_window()
         self._build()
         self._apply_mode(self.mode, save=False)
+        if instancia is not None:
+            serve(instancia, self._marcar_pedido_foco)
         self.after(200, self._tick)
+        self.after(250, self._atender_pedido_foco)
         self.after(600, self._schedule_usage)
 
     # ------------------------------------------------------------- estrutura
@@ -411,13 +476,7 @@ class UsageWidget(tk.Tk):
         self.menu.add_checkbutton(
             label="Sempre visível", variable=self.var_top, command=self._toggle_top
         )
-        opacity = tk.Menu(
-            self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
-            activebackground=P["accent"], activeforeground=P["menu_fg"],
-        )
-        for label, value in (("100%", 1.0), ("96%", 0.96), ("85%", 0.85), ("70%", 0.70)):
-            opacity.add_command(label=label, command=lambda v=value: self._set_opacity(v))
-        self.menu.add_cascade(label="Opacidade", menu=opacity)
+        self.menu.add_command(label="Opacidade…", command=self._abrir_opacidade)
         self.menu.add_separator()
         self.menu.add_command(label="Fechar", command=self.quit_widget)
         self.menu.add_separator()
@@ -475,6 +534,50 @@ class UsageWidget(tk.Tk):
         self.update_idletasks()
         self.geometry("")
         self.update_idletasks()
+
+    # -------------------------------------------------------- copia unica
+
+    def _marcar_pedido_foco(self) -> None:
+        """Chamado da thread do listener: apenas sinaliza."""
+        self._pedido_foco = True
+
+    def _atender_pedido_foco(self) -> None:
+        """Verifica o sinal na thread da interface, onde e seguro mexer na janela."""
+        if self._pedido_foco:
+            self._pedido_foco = False
+            self._trazer_para_frente()
+        self.after(250, self._atender_pedido_foco)
+
+    def _trazer_para_frente(self) -> None:
+        """Mostra a janela quando alguem tenta abrir uma segunda copia.
+
+        Se a posicao salva ficou fora da area visivel -- monitor desconectado,
+        por exemplo --, a janela volta para o canto da tela principal, senao o
+        usuario clicaria no atalho sem ver nada acontecer.
+        """
+        if self._fora_da_tela():
+            self.geometry("+40+40")
+            self.cfg.pos_x, self.cfg.pos_y = 40, 40
+            self.cfg.save()
+
+        self.deiconify()
+        self.lift()
+        self.attributes("-topmost", True)
+        self.update_idletasks()
+        if not self.cfg.always_on_top:
+            self.attributes("-topmost", False)
+
+    def _fora_da_tela(self) -> bool:
+        """A janela esta fora de qualquer monitor?"""
+        x, y = self.winfo_x(), self.winfo_y()
+        largura, altura = self.winfo_width(), self.winfo_height()
+        # winfo_vroot* cobre a area de trabalho inteira, com varios monitores.
+        vx, vy = self.winfo_vrootx(), self.winfo_vrooty()
+        vw, vh = self.winfo_vrootwidth(), self.winfo_vrootheight()
+        return (
+            x + largura < vx or x > vx + vw
+            or y + altura < vy or y > vy + vh
+        )
 
     # ---------------------------------------------------------- interacoes
 
@@ -534,12 +637,74 @@ class UsageWidget(tk.Tk):
             self.attributes("-alpha", value)
         except tk.TclError:
             pass
-        self.cfg.save()
+
+    def _abrir_opacidade(self) -> None:
+        """Janelinha com o controle deslizante de 1 a 100%.
+
+        Ela propria fica sempre opaca: com o widget em 1% seria impossivel
+        enxergar o controle para desfazer o ajuste.
+        """
+        if getattr(self, "_popup_opacidade", None) is not None:
+            try:
+                self._popup_opacidade.destroy()
+            except tk.TclError:
+                pass
+
+        popup = tk.Toplevel(self)
+        self._popup_opacidade = popup
+        popup.overrideredirect(True)
+        popup.attributes("-topmost", True)
+        popup.configure(bg=P["border"])
+
+        corpo = tk.Frame(popup, bg=P["bg"])
+        corpo.pack(fill="both", expand=True, padx=1, pady=1)
+
+        topo = tk.Frame(corpo, bg=P["bg"])
+        topo.pack(fill="x", padx=PAD, pady=(10, 0))
+        tk.Label(
+            topo, text="OPACIDADE", bg=P["bg"], fg=P["fg_dim"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+        rotulo = tk.Label(
+            topo, text=f"{round(self.cfg.opacity * 100)}%", bg=P["bg"], fg=P["fg"],
+            font=("Segoe UI", 11, "bold"),
+        )
+        rotulo.pack(side="right")
+
+        def mudou(valor: int) -> None:
+            rotulo.configure(text=f"{valor}%")
+            self._set_opacity(valor / 100)
+
+        largura = WIDTH - PAD * 2
+        Slider(
+            corpo, largura, round(self.cfg.opacity * 100), 1, 100, mudou
+        ).pack(padx=PAD, pady=(8, 4))
+
+        tk.Label(
+            corpo, text="Esc ou clique fora para fechar", bg=P["bg"],
+            fg=P["fg_faint"], font=("Segoe UI", 7),
+        ).pack(pady=(0, 9))
+
+        def fechar(_evento=None) -> None:
+            self.cfg.save()
+            self._popup_opacidade = None
+            popup.destroy()
+
+        popup.bind("<Escape>", fechar)
+        popup.bind("<FocusOut>", fechar)
+        popup.update_idletasks()
+        popup.geometry(f"+{self.winfo_x()}+{self.winfo_y() + self.winfo_height() + 6}")
+        popup.focus_force()
 
     def quit_widget(self, _event=None) -> None:
         self.cfg.pos_x = self.winfo_x()
         self.cfg.pos_y = self.winfo_y()
         self.cfg.save()
+        if self._instancia is not None:
+            try:
+                self._instancia.close()
+            except OSError:
+                pass
         self.destroy()
 
     # ------------------------------------------------------------ atualizacao
@@ -716,4 +881,12 @@ def _wants_event(func) -> bool:
 
 
 def run() -> None:
-    UsageWidget().mainloop()
+    """Abre o widget, ou traz para frente a copia que ja estiver aberta."""
+    from .single_instance import claim, wake_existing
+
+    instancia = claim()
+    if instancia is None:
+        if wake_existing():
+            return  # ja havia uma copia; ela veio para frente
+        # A porta esta ocupada por outro programa: seguimos sem a protecao.
+    UsageWidget(instancia).mainloop()
