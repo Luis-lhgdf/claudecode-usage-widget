@@ -21,6 +21,7 @@ Tudo que e estimado leva o prefixo `~`, para nao se confundir com dado oficial.
 
 from __future__ import annotations
 
+import math
 import threading
 import tkinter as tk
 from datetime import datetime, timedelta, timezone
@@ -101,6 +102,110 @@ def fmt_duration_short(seconds: int) -> str:
     return f"{hours}h{minutes:02d}" if hours else f"{minutes}m"
 
 
+_MARK_CACHE: dict[tuple, tk.PhotoImage] = {}
+
+
+def _mark_shape(size: int) -> tuple[int, float]:
+    """Numero de raios e afinamento adequados ao tamanho pedido.
+
+    Onze raios finos so se resolvem acima de ~26px; abaixo disso cada raio
+    ocupa menos de um pixel e o simbolo vira um borrao apagado. Reduzir a
+    contagem em tamanhos pequenos preserva a leitura -- mesma ideia do hinting
+    de fontes.
+    """
+    if size < 20:
+        return 8, 2.2
+    if size < 26:
+        return 9, 2.6
+    if size < 34:
+        return 11, 3.2
+    return 11, 4.0
+
+
+def _hex_to_rgb(value: str) -> tuple[int, int, int]:
+    value = value.lstrip("#")
+    return int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16)
+
+
+def render_claude_mark(
+    size: int, color: str = ACCENT, bg: str = BG_SOFT, samples: int = 4
+) -> tk.PhotoImage:
+    """Rasteriza o simbolo do Claude com antialiasing.
+
+    O Canvas do tkinter nao suaviza bordas, e um poligono de raios finos fica
+    serrilhado em tamanho pequeno. Aqui a forma e definida em coordenadas
+    polares -- uma rosacea, `r <= R * |cos(N*theta/2)|^p`, que produz os raios
+    em gota -- e cada pixel e amostrado numa grade `samples x samples` para
+    obter a cobertura, misturada com o fundo.
+
+    Vetorial de proposito: nenhum arquivo de marca acompanha o projeto, e o
+    desenho serve qualquer tamanho ou cor. O resultado fica em cache, porque
+    montar a imagem custa mais que exibi-la.
+    """
+    key = (size, color, bg, samples)
+    cached = _MARK_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    rays, sharpness = _mark_shape(size)
+    fg_r, fg_g, fg_b = _hex_to_rgb(color)
+    bg_r, bg_g, bg_b = _hex_to_rgb(bg)
+    center = size / 2
+    radius = center * 0.98
+    step = 1.0 / samples
+    total = samples * samples
+
+    rows = []
+    for py in range(size):
+        row = []
+        for px in range(size):
+            hits = 0
+            for sy in range(samples):
+                dy = py + (sy + 0.5) * step - center
+                for sx in range(samples):
+                    dx = px + (sx + 0.5) * step - center
+                    dist = math.hypot(dx, dy)
+                    if dist > radius:
+                        continue
+                    if dist < 1e-9:
+                        hits += 1
+                        continue
+                    angle = math.atan2(dy, dx)
+                    petal = abs(math.cos(rays * angle / 2)) ** sharpness
+                    if dist <= radius * petal:
+                        hits += 1
+            if not hits:
+                row.append(bg)
+                continue
+            alpha = hits / total
+            row.append(
+                "#%02x%02x%02x"
+                % (
+                    round(bg_r + (fg_r - bg_r) * alpha),
+                    round(bg_g + (fg_g - bg_g) * alpha),
+                    round(bg_b + (fg_b - bg_b) * alpha),
+                )
+            )
+        rows.append("{" + " ".join(row) + "}")
+
+    image = tk.PhotoImage(width=size, height=size)
+    image.put(" ".join(rows))
+    _MARK_CACHE[key] = image
+    return image
+
+
+class ClaudeMark(tk.Canvas):
+    """O simbolo do Claude como widget, para usar no cabecalho."""
+
+    def __init__(self, parent, size: int = 20, bg: str = BG_SOFT, color: str = ACCENT):
+        super().__init__(
+            parent, width=size, height=size, bg=bg, highlightthickness=0, bd=0
+        )
+        # A referencia precisa sobreviver: o tkinter nao segura PhotoImage.
+        self._image = render_claude_mark(size, color, bg)
+        self.create_image(0, 0, image=self._image, anchor="nw")
+
+
 class Ring(tk.Canvas):
     """Circulo do modo mini: anel de progresso com o percentual no centro."""
 
@@ -115,18 +220,23 @@ class Ring(tk.Canvas):
 
         # Disco de fundo, para o texto ter contraste sobre qualquer janela.
         self.create_oval(1, 1, size - 1, size - 1, fill=BG, outline=BORDER)
+        # Trilho um pouco mais claro que o das barras: aqui ele fica sobre o
+        # disco escuro e precisa continuar visivel para dar a nocao de escala.
         self._track = self.create_arc(
-            *box, start=90, extent=-359.9, style="arc", width=4, outline=TRACK
+            *box, start=90, extent=-359.9, style="arc", width=4, outline="#3b352d"
         )
         self._arc = self.create_arc(
             *box, start=90, extent=0, style="arc", width=4, outline=OK
         )
+        mark_size = int(size * 0.38)
+        self._mark = render_claude_mark(mark_size, ACCENT, BG)
+        self.create_image(size / 2, size * 0.33, image=self._mark, anchor="center")
         self._value = self.create_text(
-            size / 2, size / 2 - 4, text="--", fill=FG,
-            font=("Segoe UI", 12, "bold"),
+            size / 2, size * 0.60, text="--", fill=FG,
+            font=("Segoe UI", 11, "bold"),
         )
         self._caption = self.create_text(
-            size / 2, size / 2 + 11, text="5h", fill=FG_FAINT,
+            size / 2, size * 0.775, text="5h", fill=FG_FAINT,
             font=("Segoe UI", 6),
         )
 
@@ -311,8 +421,8 @@ class UsageWidget(tk.Tk):
         header.pack_propagate(False)
         self.header = header
 
-        self.dot = tk.Label(header, text="◆", bg=BG_SOFT, fg=ACCENT, font=("Segoe UI", 9))
-        self.dot.pack(side="left", padx=(PAD - 2, 5))
+        self.dot = ClaudeMark(header, size=20)
+        self.dot.pack(side="left", padx=(PAD - 2, 6))
         self.heading = tk.Label(
             header, text="CLAUDE CODE", bg=BG_SOFT, fg=FG, font=("Segoe UI", 8, "bold")
         )

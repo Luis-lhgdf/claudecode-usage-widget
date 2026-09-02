@@ -184,4 +184,4 @@ On Pro and Max the percentages arrive through the status line. **Team accounts d
 
 MIT — veja [LICENSE](LICENSE).
 
-Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC. Este projeto apenas lê arquivos locais que o Claude Code já grava; não modifica o Claude Code nem chama nenhuma API privada.
+Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC, e o símbolo exibido no widget é uma representação desenhada em código (`render_claude_mark`, em `ccwidget/ui.py`) — nenhum arquivo de marca acompanha o repositório. O uso aqui é nominativo: identificar a ferramenta que o widget monitora. Este projeto apenas lê arquivos locais que o Claude Code já grava; não modifica o Claude Code nem chama nenhuma API privada.
