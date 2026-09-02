@@ -44,6 +44,9 @@ TRACK = "#2c2925"
 OK = "#7fa66a"
 WARN = "#d8a244"
 CRIT = "#d1614f"
+# Usada quando a barra representa tempo decorrido, nao consumo: a escala
+# verde/amarelo/vermelho sugeriria um limite se aproximando, que e outra coisa.
+NEUTRAL = "#6f6759"
 
 # Cor que o Windows torna transparente: precisa ser uma que nunca apareca no
 # desenho real, senao buracos aparecem no widget.
@@ -89,6 +92,15 @@ def fmt_duration(seconds: int) -> str:
     return f"{minutes} min"
 
 
+def fmt_duration_short(seconds: int) -> str:
+    """Versao para o circulo, onde cabem poucos caracteres: '2h05', '17m'."""
+    if seconds <= 0:
+        return "0m"
+    minutes = seconds // 60
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h{minutes:02d}" if hours else f"{minutes}m"
+
+
 class Ring(tk.Canvas):
     """Circulo do modo mini: anel de progresso com o percentual no centro."""
 
@@ -118,19 +130,26 @@ class Ring(tk.Canvas):
             font=("Segoe UI", 6),
         )
 
-    def set(self, pct: float | None, caption: str = "5h", estimated: bool = False) -> None:
+    def set(
+        self,
+        pct: float | None,
+        caption: str = "5h",
+        estimated: bool = False,
+        value_text: str | None = None,
+        neutral: bool = False,
+    ) -> None:
         if pct is None:
             self.itemconfigure(self._arc, extent=0)
-            self.itemconfigure(self._value, text="--", fill=FG_FAINT)
+            self.itemconfigure(self._value, text=value_text or "--", fill=FG_FAINT)
         else:
             pct = min(max(pct, 0.0), 100.0)
-            color = level_color(pct)
+            color = NEUTRAL if neutral else level_color(pct)
             # -0.1 evita o arco completo virar circulo fechado sem inicio visivel.
+            self.itemconfigure(self._arc, extent=-(pct * 3.599 or 0.1), outline=color)
+            text = value_text or f"{'~' if estimated else ''}{pct:.0f}%"
             self.itemconfigure(
-                self._arc, extent=-(pct * 3.599 or 0.1), outline=color
+                self._value, text=text, fill=FG_DIM if neutral else color
             )
-            prefix = "~" if estimated else ""
-            self.itemconfigure(self._value, text=f"{prefix}{pct:.0f}%", fill=color)
         self.itemconfigure(self._caption, text=caption)
 
 
@@ -196,14 +215,27 @@ class Meter(tk.Frame):
         )
         self.caption.pack(fill="x")
 
-    def update_values(self, pct: float | None, caption: str, estimated: bool = False) -> None:
+    def update_values(
+        self,
+        pct: float | None,
+        caption: str,
+        estimated: bool = False,
+        value_text: str | None = None,
+        neutral: bool = False,
+    ) -> None:
+        """Atualiza o bloco.
+
+        `value_text` substitui o percentual no destaque -- usado quando a barra
+        mede tempo, e mostrar "96%" seria lido como consumo. `neutral` tira a
+        barra da escala verde/amarelo/vermelho pelo mesmo motivo.
+        """
         if pct is None:
-            self.value.configure(text="--", fg=FG_FAINT)
+            self.value.configure(text=value_text or "--", fg=FG_FAINT)
             self.bar.set(0)
         else:
-            color = level_color(pct)
-            prefix = "~" if estimated else ""
-            self.value.configure(text=f"{prefix}{pct:.0f}%", fg=color)
+            color = NEUTRAL if neutral else level_color(pct)
+            text = value_text or f"{'~' if estimated else ''}{pct:.0f}%"
+            self.value.configure(text=text, fg=FG_DIM if neutral else color)
             self.bar.set(pct, color)
         self.caption.configure(text=caption)
 
@@ -220,6 +252,10 @@ class UsageWidget(tk.Tk):
         self._drag = (0, 0)
         self._session_pct: float | None = None
         self._session_estimated = False
+        self._session_text: str | None = None
+        self._session_neutral = False
+        self._cli_busy = False
+        self._cli_error: str | None = None
 
         self._setup_window()
         self._build()
@@ -372,6 +408,9 @@ class UsageWidget(tk.Tk):
             )
         self.menu.add_separator()
         self.menu.add_command(label="Atualizar agora", command=self._kick_refresh)
+        self.menu.add_command(
+            label="Buscar % oficial (/usage)", command=self._kick_usage_cli
+        )
         self.menu.add_checkbutton(
             label="Sempre visível", variable=self.var_top, command=self._toggle_top
         )
@@ -507,6 +546,33 @@ class UsageWidget(tk.Tk):
         """Dispara a coleta numa thread, para a interface nunca congelar."""
         threading.Thread(target=self._refresh_worker, daemon=True).start()
 
+    def _kick_usage_cli(self) -> None:
+        """Busca os percentuais rodando `claude -p /usage` numa thread.
+
+        Alternativa a status line para contas que nao recebem `rate_limits`
+        (Team, por exemplo). Leva alguns segundos, por isso e sob demanda.
+        """
+        if self._cli_busy:
+            return
+        self._cli_busy = True
+        self._cli_error = None
+        self.footer.configure(text="consultando /usage…")
+        threading.Thread(target=self._usage_cli_worker, daemon=True).start()
+
+    def _usage_cli_worker(self) -> None:
+        from .usage_cli import refresh_state
+
+        try:
+            refresh_state()
+        except Exception as exc:
+            self._cli_error = str(exc)
+        finally:
+            self._cli_busy = False
+        try:
+            self.after(0, self._kick_refresh)
+        except RuntimeError:
+            pass  # janela ja fechada
+
     def _refresh_worker(self) -> None:
         try:
             self.collector.refresh()
@@ -526,7 +592,13 @@ class UsageWidget(tk.Tk):
         self._render_session(now)
         self._render_week()
         if self.mode == "mini":
-            self.ring.set(self._session_pct, "5h", self._session_estimated)
+            self.ring.set(
+                self._session_pct,
+                "restam" if self._session_neutral else "5h",
+                self._session_estimated,
+                value_text=self._session_text,
+                neutral=self._session_neutral,
+            )
             return
         if self.mode == "full":
             self._render_details(now)
@@ -540,6 +612,8 @@ class UsageWidget(tk.Tk):
         if official is not None:
             self._session_pct = official.used_percentage
             self._session_estimated = False
+            self._session_text = None
+            self._session_neutral = False
             remaining = fmt_duration(official.remaining_seconds())
             caption = f"Reinicia em {remaining}"
             if official.resets_at:
@@ -552,21 +626,28 @@ class UsageWidget(tk.Tk):
             self.collector.requests, now=now, anchor=self.cfg.block_anchor_dt()
         )
         if block is not None:
-            # Sem numero oficial mostramos o tempo decorrido da janela, que e
-            # verificavel, em vez de inventar um percentual de consumo.
+            # Sem numero oficial nao ha como saber o consumo. Mostramos o tempo
+            # restante da janela, que e verificavel, e deixamos a barra neutra:
+            # exibir "96%" aqui seria lido como 96% do limite consumido.
             elapsed = block.elapsed_fraction(now) * 100
+            remaining_seconds = int(block.remaining(now).total_seconds())
+            reset_local = block.end.astimezone(self.tz)
             self._session_pct = elapsed
             self._session_estimated = True
-            remaining = fmt_duration(int(block.remaining(now).total_seconds()))
-            reset_local = block.end.astimezone(self.tz)
+            self._session_text = fmt_duration_short(remaining_seconds)
+            self._session_neutral = True
             self.session_meter.update_values(
                 elapsed,
-                f"~Reinicia em {remaining} · {reset_local:%H:%M} · tempo decorrido",
-                estimated=True,
+                f"Restam nesta janela · ~reinicia {reset_local:%H:%M}\n"
+                f"% de consumo indisponível sem a status line",
+                value_text=fmt_duration(remaining_seconds),
+                neutral=True,
             )
         else:
             self._session_pct = None
             self._session_estimated = False
+            self._session_text = None
+            self._session_neutral = False
             self.session_meter.update_values(None, "Nenhuma sessão ativa")
 
     def _render_week(self) -> None:
@@ -575,7 +656,9 @@ class UsageWidget(tk.Tk):
             week = None
 
         if week is None:
-            self.week_meter.update_values(None, "Instale a status line para o %")
+            self.week_meter.update_values(
+                None, "Sem dado oficial · menu › Buscar % oficial"
+            )
             return
 
         caption = "Todos os modelos"
@@ -649,6 +732,12 @@ class UsageWidget(tk.Tk):
     def _render_footer(self) -> None:
         if self._loading:
             self.footer.configure(text="carregando…")
+            return
+        if self._cli_busy:
+            self.footer.configure(text="consultando /usage…")
+            return
+        if self._cli_error:
+            self.footer.configure(text=f"/usage falhou: {self._cli_error}")
             return
 
         if self.live.available and not self.live.stale:

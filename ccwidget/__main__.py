@@ -2,6 +2,7 @@
 
     python -m ccwidget            abre o widget flutuante
     python -m ccwidget report     imprime o mesmo resumo no terminal
+    python -m ccwidget usage      busca os % oficiais via `claude -p /usage`
     python -m ccwidget statusline usado pelo Claude Code (le JSON do stdin)
 """
 
@@ -121,6 +122,23 @@ def main() -> None:
         statusline_main()
     elif command == "report":
         _report()
+    elif command == "usage":
+        from .usage_cli import refresh_state
+
+        try:
+            limits = refresh_state()
+        except RuntimeError as exc:
+            print(f"  falhou: {exc}")
+            raise SystemExit(1)
+        rotulos = {
+            "five_hour": "Sessão", "seven_day": "Semana", "fable_week": "Semana (Fable)"
+        }
+        print()
+        for key, window in limits.items():
+            print(f"  {rotulos.get(key, key):<15} {window['used_percentage']:5.1f}%")
+        print()
+        print("  gravado em ~/.ccwidget/state.json")
+        print()
     elif command in ("-h", "--help", "help"):
         print(__doc__)
     else:

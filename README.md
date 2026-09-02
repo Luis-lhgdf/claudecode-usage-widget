@@ -32,9 +32,9 @@ Alterne pelo botão `⋮`, por duplo clique no cabeçalho, ou clicando no círcu
 
 ## Como funciona
 
-O widget lê duas fontes e deixa explícito de onde vem cada número.
+O widget lê três fontes e deixa explícito de onde vem cada número.
 
-**1. Percentuais oficiais — pela status line**
+**1. Percentuais oficiais — pela status line** *(preferido)*
 
 O Claude Code entrega um JSON para o comando configurado como `statusLine`, e esse JSON traz os números reais:
 
@@ -53,7 +53,17 @@ Este projeto instala uma ponte como sua status line. Ela grava esse payload em `
 
 Sem chamada de API, sem gastar token, sem polling — apenas aproveita uma renderização que já ia acontecer (~60 ms).
 
-**2. Tokens, valor e projetos — dos logs locais**
+**2. Percentuais oficiais — pelo `/usage`** *(alternativa)*
+
+`rate_limits` só é entregue a assinantes Pro e Max. Contas **Team** não recebem esse campo, mas respondem ao comando `/usage`. Para esses casos, o menu tem **Buscar % oficial (/usage)**, que roda:
+
+```bash
+claude -p "/usage"
+```
+
+e extrai os mesmos números da saída. É um comando local, sem resposta de modelo — não consome tokens. Como leva alguns segundos para o CLI iniciar, roda sob demanda, nunca a cada atualização da tela. Também disponível como `python -m ccwidget usage`.
+
+**3. Tokens, valor e projetos — dos logs locais**
 
 O Claude Code grava cada sessão em `~/.claude/projects/**/*.jsonl`. O widget lê esses arquivos para tokens, valor equivalente e ranking por projeto.
 
@@ -69,6 +79,7 @@ git clone https://github.com/Luis-lhgdf/claudecode-usage-widget.git
 cd claudecode-usage-widget
 
 # 1. alimenta o widget com os percentuais oficiais
+#    (conta Team: pule esta linha e use o menu > Buscar % oficial)
 .\scripts\install-statusline.ps1
 
 # 2. (opcional) abre junto com o Windows
@@ -91,13 +102,14 @@ O `install-statusline.ps1` faz backup do `settings.json` antes de mexer, e se re
 | Clicar no círculo | Abre o modo resumo |
 | Duplo clique no cabeçalho | Alterna resumo ↔ completo |
 | `–` | Minimiza para o círculo |
-| `⋮` ou botão direito | Menu: modos, sempre visível, projetos, opacidade |
+| `⋮` ou botão direito | Menu: modos, buscar % oficial, opacidade, projetos |
 | `✕` ou `Esc` | Fecha |
 
 Prefere o terminal? Os mesmos números, sem janela:
 
 ```bash
-python -m ccwidget report
+python -m ccwidget report    # resumo completo
+python -m ccwidget usage     # busca os % oficiais e grava para o widget
 ```
 
 Posição, modo, opacidade e preferências ficam em `~/.ccwidget/config.json`.
@@ -108,9 +120,15 @@ O selo no canto superior direito diz de onde vêm os percentuais:
 
 | Selo | Significado |
 |---|---|
-| `oficial` | Números vivos da status line — idênticos aos do `/usage` |
+| `oficial` | Números vivos — idênticos aos do `/usage` |
 | `cache` | Números oficiais, mas nenhuma sessão renderizou recentemente |
-| `local` | Sem dado oficial; a barra da sessão mostra o *tempo decorrido* da janela, não o consumo |
+| `local` | Sem dado oficial disponível |
+
+Sem dado oficial, **o widget não inventa um percentual de consumo**. Ele troca o destaque pelo tempo que resta na janela de 5 horas e deixa a barra cinza, porque tempo passando não é consumo:
+
+<div align="center">
+<img src="docs/modo-resumo-sem-oficial.png" width="294" alt="Modo resumo sem dado oficial, mostrando tempo restante em cinza">
+</div>
 
 **Tudo com o prefixo `~` é estimativa.** O valor em dólar é *equivalente de API*, não cobrança: em assinatura Pro/Max/Team você não paga por token. Serve para comparar sessões e ver quanto sua assinatura vale — não para prever fatura.
 
@@ -118,7 +136,7 @@ O selo no canto superior direito diz de onde vêm os percentuais:
 
 Dito de forma direta, porque medidor que exagera a própria precisão é pior que medidor nenhum:
 
-- **`rate_limits` exige assinatura Claude.ai Pro ou Max** (ou um gateway com limite de gasto), e só aparece depois da primeira resposta da API na sessão. Sem ele, o widget cai para as estimativas locais e sinaliza isso no selo.
+- **`rate_limits` exige assinatura Claude.ai Pro ou Max** (ou um gateway com limite de gasto), e só aparece depois da primeira resposta da API na sessão. Contas **Team** não recebem esse campo pela status line — use **Buscar % oficial (/usage)** no menu, que funciona nelas.
 - **Os logs locais cobrem apenas esta máquina.** Outros dispositivos e o claude.ai não entram — a mesma ressalva que o próprio `/usage` faz. Em teste, um bloco de 5 horas havia começado 11 minutos antes do registro local mais antigo, por uso em outro dispositivo. Os percentuais oficiais não têm esse problema; as estimativas locais têm.
 - **O valor vem dos preços públicos da API** (`ccwidget/pricing.py`), com os multiplicadores de cache: 1,25× o input para escrita de 5 minutos, 2× para 1 hora, 0,1× para leitura. Modelos desconhecidos usam a faixa Opus.
 - **O widget não atualiza os números oficiais sozinho.** Eles mudam quando o Claude Code renderiza a status line. Se você ficou um tempo sem usar, o selo mostra `cache` e o rodapé informa há quanto tempo.
@@ -131,9 +149,10 @@ ccwidget/
   analytics.py   blocos de 5h, janela semanal, agrupamentos
   pricing.py     tabela de preços por modelo e cálculo de custo
   state.py       lê o que a status line publicou
+  usage_cli.py   fonte alternativa: roda e interpreta o `claude -p /usage`
   statusline.py  a ponte: grava o estado e imprime a status line
   ui.py          o widget tkinter, com os três modos
-  __main__.py    entrada (widget / report / statusline)
+  __main__.py    entrada (widget / report / usage / statusline)
 statusline_hook.py   o que o Claude Code invoca
 run_widget.pyw       abre sem janela de console
 scripts/             instaladores PowerShell
@@ -155,7 +174,7 @@ A floating desktop widget for Claude Code usage: 5-hour session window, weekly l
 
 The percentages are **the official ones**. Claude Code hands a JSON payload containing `rate_limits` to whatever command you set as your `statusLine`; this project installs a small bridge there, which stores the payload for the widget and prints a compact status line back to your terminal. No API calls, no tokens spent, ~60 ms per render. Tokens, cost and the per-project ranking come from the local session logs in `~/.claude/projects`, deduplicated by `requestId` (a single response is written as several lines repeating the same `usage` object — counting them raw inflates totals ~3×) and read incrementally via cached byte offsets.
 
-Requires a Pro or Max subscription for the official percentages; without them the widget falls back to local estimates and labels them. Local logs only cover this machine, not other devices or claude.ai. Anything prefixed `~` is an estimate, and the dollar figure is API-equivalent value, not a charge.
+On Pro and Max the percentages arrive through the status line. **Team accounts don't get `rate_limits`**, so the widget also ships a second official source: a menu action that runs `claude -p "/usage"` and parses its output — a local command, no tokens spent. With neither source available, the widget refuses to invent a consumption figure: it shows the time left in the 5-hour window on a neutral grey bar instead. Local logs only cover this machine, not other devices or claude.ai. Anything prefixed `~` is an estimate, and the dollar figure is API-equivalent value, not a charge.
 
 **The interface is in Portuguese.** Install with `.\scripts\install-statusline.ps1`, run with `pythonw run_widget.pyw`, or use `python -m ccwidget report` for a terminal summary.
 
