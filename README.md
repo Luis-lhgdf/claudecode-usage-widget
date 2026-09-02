@@ -18,14 +18,15 @@ Celular tem widget para tudo. Computador, quase nada. E o número que importa en
 
 Isso põe o número na tela, permanentemente.
 
-## Dois modos
+## Três modos
 
-Alterne pelo botão `⋮`, por duplo clique no cabeçalho, ou clicando no círculo.
+Alterne pelo menu da engrenagem `⚙`.
 
 <table>
 <tr>
-<td align="center" width="40%"><img src="docs/minimizado.png" width="64" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o mascote<br>e o anel da sessão</sub></td>
-<td align="center" width="60%"><img src="docs/painel-escuro.png" width="230" alt="Painel"><br><b>Painel</b><br><sub>Sessão atual e limite semanal</sub></td>
+<td align="center" width="25%"><img src="docs/minimizado.png" width="64" alt="Modo minimizado"><br><b>Minimizado</b><br><sub>Círculo flutuante com o<br>mascote e o anel da sessão.<br>Um clique abre o painel</sub></td>
+<td align="center" width="40%"><img src="docs/gaveta.png" width="220" alt="Modo gaveta"><br><b>Gaveta</b><br><sub>Encostado na borda direita,<br>só a abinha aparece.<br>Um clique nela desliza o painel</sub></td>
+<td align="center" width="35%"><img src="docs/painel-escuro.png" width="200" alt="Painel"><br><b>Painel</b><br><sub>Livre na tela,<br>arraste para onde quiser</sub></td>
 </tr>
 </table>
 
@@ -74,12 +75,14 @@ Requer o CLI do Claude Code no `PATH` (o widget o executa) e Python 3.10 ou mais
 
 | Ação | Resultado |
 |---|---|
+| `↻` | Consulta o `/usage` agora |
+| `⚙` ou botão direito | Menu: modo, tema, intervalo, opacidade |
+| `─` | Minimiza para o círculo |
+| `✕` ou `Esc` | Fecha |
 | Arrastar o cabeçalho ou o círculo | Move o widget |
 | Clicar no círculo | Abre o painel |
-| Duplo clique no cabeçalho | Minimiza |
-| `–` | Minimiza para o círculo |
-| `⋮` ou botão direito | Menu: modo, tema, atualizar, opacidade |
-| `✕` ou `Esc` | Fecha |
+| Clicar na aba da gaveta | Desliza o painel para dentro ou para fora |
+| Arrastar a aba da gaveta | Sobe ou desce a gaveta na borda |
 
 Sem janela, direto no terminal:
 
@@ -88,7 +91,7 @@ python -m ccwidget usage     # consulta e grava
 python -m ccwidget report    # imprime os percentuais
 ```
 
-Modo, tema, posição e opacidade ficam em `~/.ccwidget/config.json` — inclusive `usage_refresh_minutes`, que controla o intervalo entre consultas (`0` desliga a consulta automática).
+O intervalo entre consultas automáticas sai do menu **Atualizar a cada** (5, 10, 15, 30, 60 minutos ou só manual; o padrão é 10). Ele e as demais preferências — modo, tema, posição, opacidade — ficam em `~/.ccwidget/config.json`.
 
 ## Estrutura
 

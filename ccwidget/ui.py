@@ -3,20 +3,23 @@
 Janela sem bordas, sempre acima das outras, arrastavel para qualquer canto da
 tela, montada com tkinter (biblioteca padrao -- nao ha nada para instalar).
 
-Dois modos, alternados pelo botao de menu, por duplo clique no cabecalho ou
-clicando no circulo:
+Tres modos, alternados pelo menu da engrenagem:
 
 * **mini**   -- so um circulo flutuante com o mascote e o anel da sessao.
-* **painel** -- sessao de 5 horas e limite semanal, com barras e horarios.
+* **gaveta** -- encostado na borda direita da tela, mostrando so uma abinha;
+  um clique nela desliza o painel para dentro da tela.
+* **painel** -- sessao de 5 horas e limite semanal, livre na tela.
 
-Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`, consultado
-em intervalo configuravel e sob demanda pelo menu. O widget nao estima consumo
-por conta propria -- quando o dado oficial falta, ele diz que falta.
+Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`. A consulta
+acontece sozinha a cada dez minutos por padrao -- o intervalo e ajustavel pelo
+menu -- e sob demanda no botao de atualizar. O widget nao estima consumo por
+conta propria: sem dado, ele diz que nao tem dado.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 import tkinter as tk
 from datetime import datetime
 
@@ -36,8 +39,12 @@ PAD = 14
 WIDTH = 268
 RING_SIZE = 64
 
-MODES = ("mini", "panel")
+MODES = ("mini", "drawer", "panel")
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
+
+DRAWER_TAB = 20      # largura da abinha que fica visivel na borda da tela
+DRAWER_STEPS = 12    # quadros da animacao de abrir e fechar
+DRAWER_FRAME_MS = 12
 
 
 def fmt_duration(seconds: int) -> str:
@@ -196,6 +203,8 @@ class UsageWidget(tk.Tk):
         self._session_pct: float | None = None
         self._cli_busy = False
         self._cli_error: str | None = None
+        self._next_usage_at: float | None = None
+        self._drawer_open = False
 
         self._setup_window()
         self._build()
@@ -206,7 +215,7 @@ class UsageWidget(tk.Tk):
     # ------------------------------------------------------------- estrutura
 
     def _setup_window(self) -> None:
-        self.title("Uso do Claude Code")
+        self.title("CC Widget")
         self.overrideredirect(True)  # sem barra de titulo do sistema
         self.configure(bg=P["bg"])
         self.attributes("-topmost", self.cfg.always_on_top)
@@ -223,7 +232,38 @@ class UsageWidget(tk.Tk):
         self.container.pack(fill="both", expand=True)
         self._build_ring()
         self._build_panel()
+        self._build_tab()
         self._build_menu()
+
+    def _build_tab(self) -> None:
+        """A abinha do modo gaveta: a alca que fica visivel na borda da tela."""
+        # Borda propria: encostada no painel, a aba precisa de um contorno para
+        # nao virar uma extensao dele, e de contorno tambem quando esta sozinha
+        # na borda da tela, sobre qualquer janela por baixo.
+        self.tab = tk.Frame(self.container, bg=P["border"], width=DRAWER_TAB)
+        self.tab.pack_propagate(False)
+
+        face = tk.Frame(self.tab, bg=P["bg_soft"])
+        face.pack(fill="both", expand=True, padx=(1, 0), pady=1)
+
+        inner = tk.Frame(face, bg=P["bg_soft"])
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+
+        self.tab_mascot = Mascot(inner, scale=1)
+        self.tab_mascot.pack(pady=(0, 6))
+        # A seta aponta para onde a gaveta vai: para dentro quando fechada,
+        # para a borda quando aberta.
+        self.tab_arrow = tk.Label(
+            inner, text="‹", bg=P["bg_soft"], fg=P["fg_dim"], font=("Segoe UI", 12)
+        )
+        self.tab_arrow.pack()
+
+        for widget in (self.tab, face, inner, self.tab_mascot, self.tab_arrow):
+            widget.configure(cursor="hand2")
+            widget.bind("<Button-1>", self._tab_press)
+            widget.bind("<B1-Motion>", self._tab_drag)
+            widget.bind("<ButtonRelease-1>", self._tab_release)
+            widget.bind("<Button-3>", self._show_menu)
 
     def _build_ring(self) -> None:
         self.ring_holder = tk.Frame(self.container, bg=CHROMA)
@@ -244,27 +284,35 @@ class UsageWidget(tk.Tk):
         # frame calcule a propria altura a partir dos filhos.
         tk.Frame(root, bg=P["bg"], width=WIDTH, height=0).pack()
 
-        header = tk.Frame(root, bg=P["bg_soft"], height=32)
+        header = tk.Frame(root, bg=P["bg_soft"], height=38)
         header.pack(fill="x")
         header.pack_propagate(False)
         self.header = header
 
         self.dot = Mascot(header, scale=1)
-        self.dot.pack(side="left", padx=(PAD - 2, 7))
+        self.dot.pack(side="left", padx=(PAD - 3, 7))
         self.heading = tk.Label(
-            header, text="CLAUDE CODE", bg=P["bg_soft"], fg=P["fg"],
-            font=("Segoe UI", 8, "bold"),
+            header, text="CC Widget", bg=P["bg_soft"], fg=P["fg"],
+            font=("Segoe UI", 9, "bold"),
         )
         self.heading.pack(side="left")
 
-        self._header_button(header, "✕", self.quit_widget, P["crit"], pad=(4, PAD - 5))
-        self._header_button(header, "⋮", self._show_menu_at_button, P["accent"])
-        self._header_button(header, "–", lambda: self._apply_mode("mini"), P["accent"])
-
-        self.source_badge = tk.Label(
-            header, text="", bg=P["bg_soft"], fg=P["fg_faint"], font=("Segoe UI", 7)
+        # O pack(side="right") empilha da direita para a esquerda, entao a
+        # ordem abaixo e o inverso do que aparece na tela. Dois grupos: os
+        # controles da janela na ponta, e as acoes do widget antes deles,
+        # separados por um filete -- fechar e minimizar sao vizinhos perigosos
+        # para um botao que se abre por engano.
+        self._header_button(header, "✕", self.quit_widget, P["crit"])
+        self._header_button(header, "─", lambda: self._apply_mode("mini"), P["accent"])
+        tk.Frame(header, bg=P["ring_track"], width=1, height=15).pack(
+            side="right", padx=5, pady=9
         )
-        self.source_badge.pack(side="right", padx=(0, 8))
+        self._header_button(
+            header, "⚙", self._show_menu_at_button, P["accent"], font_size=12
+        )
+        self.refresh_btn = self._header_button(
+            header, "↻", self._kick_usage_cli, P["accent"], font_size=12
+        )
 
         body = tk.Frame(root, bg=P["bg"])
         body.pack(fill="both", expand=True, padx=PAD, pady=(12, 4))
@@ -290,18 +338,24 @@ class UsageWidget(tk.Tk):
         root.bind("<Button-3>", self._show_menu)
         self.bind("<Escape>", lambda _e: self.quit_widget())
 
-    def _header_button(self, parent, text, command, hover, pad=(4, 2)):
+    def _header_button(self, parent, text, command, hover, font_size=13):
+        """Botao do cabecalho.
+
+        O padding interno importa mais que o tamanho da fonte: e ele que da
+        area de clique. O hover pinta o fundo, nao so o texto, para o alvo
+        ficar visivel antes do clique.
+        """
         btn = tk.Label(
-            parent, text=text, bg=P["bg_soft"], fg=P["fg_faint"],
-            font=("Segoe UI", 10), cursor="hand2",
+            parent, text=text, bg=P["bg_soft"], fg=P["fg_dim"],
+            font=("Segoe UI", font_size), cursor="hand2", padx=7, pady=3,
         )
-        btn.pack(side="right", padx=pad)
+        btn.pack(side="right", padx=1)
         btn.bind(
             "<Button-1>",
             lambda e: command(e) if _wants_event(command) else command(),
         )
-        btn.bind("<Enter>", lambda _e: btn.configure(fg=hover))
-        btn.bind("<Leave>", lambda _e: btn.configure(fg=P["fg_faint"]))
+        btn.bind("<Enter>", lambda _e: btn.configure(fg=hover, bg=P["border"]))
+        btn.bind("<Leave>", lambda _e: btn.configure(fg=P["fg_dim"], bg=P["bg_soft"]))
         return btn
 
     def _build_menu(self) -> None:
@@ -312,8 +366,11 @@ class UsageWidget(tk.Tk):
         self.var_mode = tk.StringVar(value=self.mode)
         self.var_theme = tk.StringVar(value=self.cfg.theme)
         self.var_top = tk.BooleanVar(value=self.cfg.always_on_top)
+        self.var_interval = tk.IntVar(value=self.cfg.usage_refresh_minutes)
 
-        for label, value in (("Minimizado", "mini"), ("Painel", "panel")):
+        for label, value in (
+            ("Minimizado", "mini"), ("Gaveta", "drawer"), ("Painel", "panel")
+        ):
             self.menu.add_radiobutton(
                 label=label, value=value, variable=self.var_mode,
                 command=lambda v=value: self._apply_mode(v),
@@ -334,6 +391,24 @@ class UsageWidget(tk.Tk):
             )
         self.menu.add_cascade(label="Tema", menu=theme_menu)
 
+        interval_menu = tk.Menu(
+            self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
+            activebackground=P["accent"], activeforeground=P["menu_fg"],
+        )
+        for label, value in (
+            ("5 minutos", 5),
+            ("10 minutos", 10),
+            ("15 minutos", 15),
+            ("30 minutos", 30),
+            ("1 hora", 60),
+            ("Só manual", 0),
+        ):
+            interval_menu.add_radiobutton(
+                label=label, value=value, variable=self.var_interval,
+                command=lambda v=value: self._set_interval(v),
+            )
+        self.menu.add_cascade(label="Atualizar a cada", menu=interval_menu)
+
         self.menu.add_checkbutton(
             label="Sempre visível", variable=self.var_top, command=self._toggle_top
         )
@@ -352,11 +427,13 @@ class UsageWidget(tk.Tk):
     def _apply_mode(self, mode: str, save: bool = True) -> None:
         if mode not in MODES:
             mode = "panel"
+        anterior = self.mode
         self.mode = mode
         self.var_mode.set(mode)
 
         self.ring_holder.pack_forget()
         self.panel.pack_forget()
+        self.tab.pack_forget()
         self.footer.pack_forget()
 
         if mode == "mini":
@@ -364,14 +441,81 @@ class UsageWidget(tk.Tk):
             self.ring_holder.pack()
         else:
             self.container.configure(bg=P["bg"])
-            self.panel.pack(fill="both", expand=True)
             self.footer.pack(fill="x", padx=PAD, pady=(10, 8))
+            if mode == "drawer":
+                # A aba vai na direita, colada na borda da tela; o painel
+                # desliza para dentro e para fora atras dela.
+                self.tab.pack(side="right", fill="y")
+                self.panel.pack(side="left", fill="both", expand=True)
+            else:
+                self.panel.pack(fill="both", expand=True)
 
         self._resize()
+
+        if mode == "drawer":
+            self._drawer_open = False
+            self._snap_drawer(animate=False)
+        elif anterior == "drawer":
+            # Sai da borda e volta para a posicao livre guardada.
+            self.geometry(f"+{self.cfg.pos_x}+{self.cfg.pos_y}")
+
         if save:
             self.cfg.mode = mode
             self.cfg.save()
         self._render()
+
+    # ------------------------------------------------------------------ gaveta
+
+    def _drawer_x(self, aberto: bool) -> int:
+        """X da janela com a gaveta aberta ou fechada.
+
+        Fechada, so a abinha fica dentro da tela: o resto da janela fica para
+        fora, o que o Windows permite e e justamente o efeito de gaveta.
+        """
+        largura = self.winfo_width() or (WIDTH + DRAWER_TAB + 2)
+        tela = self.winfo_screenwidth()
+        return tela - largura if aberto else tela - DRAWER_TAB
+
+    def _snap_drawer(self, animate: bool = True) -> None:
+        alvo = self._drawer_x(self._drawer_open)
+        self.tab_arrow.configure(text="›" if self._drawer_open else "‹")
+        if animate:
+            self._slide_to(alvo)
+        else:
+            self.geometry(f"+{alvo}+{self.cfg.drawer_y}")
+
+    def _slide_to(self, alvo: int, passo: int = 0) -> None:
+        """Anima o deslize com desaceleracao no fim."""
+        if passo >= DRAWER_STEPS:
+            self.geometry(f"+{alvo}+{self.winfo_y()}")
+            return
+        inicio = self.winfo_x()
+        # ease-out: avanca mais no comeco e chega devagar
+        fracao = 1 - (1 - (passo + 1) / DRAWER_STEPS) ** 3
+        atual = int(inicio + (alvo - inicio) * fracao / max(1 - fracao + 0.0001, 0.35))
+        self.geometry(f"+{min(max(atual, min(inicio, alvo)), max(inicio, alvo))}+{self.winfo_y()}")
+        self.after(DRAWER_FRAME_MS, lambda: self._slide_to(alvo, passo + 1))
+
+    def _toggle_drawer(self) -> None:
+        self._drawer_open = not self._drawer_open
+        self._snap_drawer()
+
+    def _tab_press(self, event) -> None:
+        self._drag_start(event)
+        self._drag_origin = (event.x_root, event.y_root)
+
+    def _tab_drag(self, event) -> None:
+        """Na gaveta so o movimento vertical faz sentido: o X fica na borda."""
+        y = event.y_root - self._drag[1]
+        self.geometry(f"+{self.winfo_x()}+{y}")
+
+    def _tab_release(self, event) -> None:
+        origin = getattr(self, "_drag_origin", (event.x_root, event.y_root))
+        moved = abs(event.x_root - origin[0]) + abs(event.y_root - origin[1])
+        self.cfg.drawer_y = self.winfo_y()
+        self.cfg.save()
+        if moved < 5:
+            self._toggle_drawer()
 
     def _apply_theme(self, name: str) -> None:
         """Troca a paleta reconstruindo a interface.
@@ -440,6 +584,13 @@ class UsageWidget(tk.Tk):
         finally:
             self.menu.grab_release()
 
+    def _set_interval(self, minutes: int) -> None:
+        """Troca o intervalo entre consultas automaticas, pelo menu."""
+        self.cfg.usage_refresh_minutes = minutes
+        self.cfg.save()
+        self._next_usage_at = time.time() + minutes * 60 if minutes else None
+        self._render_footer()
+
     def _toggle_top(self) -> None:
         self.cfg.always_on_top = self.var_top.get()
         self.attributes("-topmost", self.cfg.always_on_top)
@@ -474,6 +625,7 @@ class UsageWidget(tk.Tk):
             return
         if self.live.age_seconds > minutes * 60:
             self._kick_usage_cli()
+        self._next_usage_at = time.time() + minutes * 60
         self.after(minutes * 60_000, self._schedule_usage)
 
     def _kick_usage_cli(self) -> None:
@@ -549,27 +701,43 @@ class UsageWidget(tk.Tk):
         self.week_meter.update_values(window.used_percentage, caption)
 
     def _render_footer(self) -> None:
+        """Rodape: quando o dado foi lido e quando sera lido de novo.
+
+        Substitui o antigo selo "oficial/antigo", que descrevia a fonte numa
+        epoca em que havia duas. Com uma fonte so, o que resta a informar e a
+        idade do numero -- e isso e melhor dito com o tempo do que com rotulo.
+        """
         if self._cli_busy:
-            self.source_badge.configure(text="…", fg=P["fg_faint"])
-            self.footer.configure(text="consultando /usage…")
+            self.refresh_btn.configure(fg=P["accent"])
+            self.footer.configure(text="consultando /usage…", fg=P["fg_dim"])
             return
+
+        self.refresh_btn.configure(fg=P["fg_dim"])
+
         if self._cli_error:
-            self.source_badge.configure(text="erro", fg=P["crit"])
-            self.footer.configure(text=f"/usage falhou: {self._cli_error}")
+            self.footer.configure(text=f"falhou: {self._cli_error}", fg=P["crit"])
             return
         if not self.live.available:
-            self.source_badge.configure(text="sem dado", fg=P["fg_faint"])
-            self.footer.configure(text="nenhuma consulta ao /usage ainda")
+            self.footer.configure(
+                text="sem dados ainda · clique em ↻", fg=P["fg_faint"]
+            )
             return
 
         age = int(self.live.age_seconds)
-        stale = self.live.stale
-        self.source_badge.configure(
-            text="antigo" if stale else "oficial",
-            fg=P["warn"] if stale else P["ok"],
+        texto = (
+            "Atualizado agora há pouco"
+            if age < 60
+            else f"Atualizado há {fmt_duration(age)}"
         )
-        quando = "agora" if age < 60 else f"há {fmt_duration(age)}"
-        self.footer.configure(text=f"/usage consultado {quando}")
+
+        if self._next_usage_at:
+            falta = int(self._next_usage_at - time.time())
+            if falta > 0:
+                texto += f" · próxima em {fmt_duration(falta)}"
+
+        self.footer.configure(
+            text=texto, fg=P["warn"] if self.live.stale else P["fg_faint"]
+        )
 
 
 def _wants_event(func) -> bool:
