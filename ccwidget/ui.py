@@ -44,6 +44,7 @@ from .theme import (
     render_bar_loading,
     render_dot,
     render_mascot,
+    render_mascot_off,
     render_pose,
     render_ring,
     set_skin,
@@ -149,14 +150,18 @@ class Mascot(tk.Canvas):
 
     def __init__(self, parent, scale: int = 1, bg: str | None = None) -> None:
         bg = bg or P["bg_soft"]
+        # A tela toma o tamanho da imagem, e nao o do corpo: uma skin de
+        # chapeu rende um desenho mais alto, e num quadro fixo de 12 linhas
+        # ele sairia com os pes cortados.
+        imagem = render_mascot(scale, bg=bg)
         super().__init__(
-            parent, width=MASCOT_W * scale, height=MASCOT_H * scale,
+            parent, width=imagem.width(), height=imagem.height(),
             bg=bg, highlightthickness=0, bd=0,
         )
         self._scale = scale
         self._bg = bg
         # A referencia precisa sobreviver: o tkinter nao segura PhotoImage.
-        self._image = render_mascot(scale, bg=bg)
+        self._image = imagem
         self._image_id = self.create_image(0, 0, image=self._image, anchor="nw")
 
     def set_frame(self, frame: int) -> None:
@@ -182,10 +187,14 @@ class Ring(tk.Canvas):
 
         # Alturas em fracao do diametro, com folga nas duas pontas: o mascote
         # nao encosta no anel e a hora nao encosta na base.
-        self._mascot = render_mascot(2, bg=P["bg"])
+        # `render_mascot_off` devolve tambem quanto subir a imagem para que o
+        # corpo fique onde estaria sem acessorio nenhum -- e o que mantem o
+        # mascote na mesma altura em todas as skins.
+        self._mascot, self._mascot_dy = render_mascot_off(2, bg=P["bg"])
         self._mascot_y = size * 0.30
         self._mascot_id = self.create_image(
-            size / 2, self._mascot_y, image=self._mascot, anchor="center"
+            size / 2, self._mascot_y + self._mascot_dy,
+            image=self._mascot, anchor="center",
         )
         self._value = self.create_text(
             size / 2, size * 0.555, text="--", fill=P["fg"],
@@ -205,12 +214,17 @@ class Ring(tk.Canvas):
         self.itemconfigure(self._reset, text="")
 
     def _set_mascot(self, frame: int) -> None:
-        self._mascot = render_mascot(2, bg=P["bg"], frame=frame)
+        self._mascot, self._mascot_dy = render_mascot_off(
+            2, bg=P["bg"], frame=frame
+        )
         self.itemconfigure(self._mascot_id, image=self._mascot)
         # Sobe um pixel no quadro em que um pe esta no ar: sem isso a caminhada
         # fica so nos pes, e de longe nem se nota.
         salto = -1 if frame % 2 else 0
-        self.coords(self._mascot_id, self.size / 2, self._mascot_y + salto)
+        self.coords(
+            self._mascot_id,
+            self.size / 2, self._mascot_y + self._mascot_dy + salto,
+        )
 
     def gracejar(self, tipo: str, quadro: int) -> None:
         """Um quadro de uma pose ociosa (piscar, olhar de lado, pular...)."""
@@ -229,11 +243,14 @@ class Ring(tk.Canvas):
 
     def despedir(self, passo: int, avanco: int, acenando: bool) -> None:
         """Acena parado e depois sai andando pela direita."""
-        self._mascot = render_mascot(2, bg=P["bg"], frame=passo, wave=acenando)
+        self._mascot, self._mascot_dy = render_mascot_off(
+            2, bg=P["bg"], frame=passo, wave=acenando
+        )
         self.itemconfigure(self._mascot_id, image=self._mascot)
         salto = 0 if acenando else (-1 if passo % 2 else 0)
         self.coords(
-            self._mascot_id, self.size / 2 + avanco, self._mascot_y + salto
+            self._mascot_id, self.size / 2 + avanco,
+            self._mascot_y + self._mascot_dy + salto,
         )
 
     def set(self, pct: float | None, reset_text: str = "") -> None:
@@ -731,15 +748,20 @@ class UsageWidget(tk.Tk):
 
             largura = self.panel_root.winfo_width()
             altura = self.panel_root.winfo_height()
-            # Destino: o proprio lugar do mascote no cabecalho.
+            # Destino: o proprio lugar do mascote no cabecalho. O corpo fica
+            # rente ao pe da tela do dot -- o acessorio e que ocupa o resto --,
+            # entao o alvo se mede a partir da base, e nao do meio.
             self._alvo = (
                 self.dot.winfo_x() + MASCOT_W / 2,
-                self.dot.winfo_y() + MASCOT_H / 2,
+                self.dot.winfo_y() + self.dot.winfo_height() - MASCOT_H / 2,
             )
             self._centro = (largura / 2, altura / 2 - 4)
-            self._palco_imagem = render_mascot(PALCO_ESCALA, bg=P["bg"])
+            self._palco_imagem, palco_dy = render_mascot_off(
+                PALCO_ESCALA, bg=P["bg"]
+            )
             self._palco_id = self.palco.create_image(
-                *self._centro, image=self._palco_imagem, anchor="center"
+                self._centro[0], self._centro[1] + palco_dy,
+                image=self._palco_imagem, anchor="center",
             )
             self._palco_texto = self.palco.create_text(
                 largura / 2, self._centro[1] + MASCOT_H * PALCO_ESCALA / 2 + 16,
@@ -750,11 +772,11 @@ class UsageWidget(tk.Tk):
             return False
 
     def _desenhar_no_palco(self, x, y, escala, frame=0, wave=False) -> None:
-        self._palco_imagem = render_mascot(
+        self._palco_imagem, dy = render_mascot_off(
             max(int(escala), 1), bg=P["bg"], frame=frame, wave=wave
         )
         self.palco.itemconfigure(self._palco_id, image=self._palco_imagem)
-        self.palco.coords(self._palco_id, x, y)
+        self.palco.coords(self._palco_id, x, y + dy)
 
     def _comecar_entrada(self) -> None:
         if not self.cfg.animations:
@@ -837,12 +859,12 @@ class UsageWidget(tk.Tk):
         y = self._centro[1] + (self._alvo[1] - self._centro[1]) * suave
         escala = max(round(PALCO_ESCALA - (PALCO_ESCALA - 1) * suave), 1)
 
-        imagem = render_mascot(escala, bg=P["bg"], frame=passo)
+        imagem, dy = render_mascot_off(escala, bg=P["bg"], frame=passo)
         self.viajante.configure(
-            image=imagem, width=MASCOT_W * escala, height=MASCOT_H * escala
+            image=imagem, width=imagem.width(), height=imagem.height()
         )
         self.viajante.image = imagem      # a referencia precisa sobreviver
-        self.viajante.place(x=x, y=y, anchor="center")
+        self.viajante.place(x=x, y=y + dy, anchor="center")
 
         # O palco recua de baixo para cima, revelando o painel aos poucos.
         # `relheight` precisa ser zerado junto: enquanto valer 1, ele manda na

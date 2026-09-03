@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from .skins import SKINS, SKIN_PADRAO, TOPO_MAX, compor, cores
+
 # Cor que o Windows torna transparente no modo mini: precisa ser uma que nunca
 # apareca no desenho real, senao buracos aparecem no widget.
 CHROMA = "#ff00fe"
@@ -190,145 +192,9 @@ _MASCOT_CACHE: dict[tuple, tk.PhotoImage] = {}
 
 # ------------------------------------------------------------------ skins
 
-# Uma skin muda a cor do mascote, pode pintar detalhes dentro do corpo e pode
-# acrescentar um "topo" -- chapeu, antenas, orelhas -- desenhado acima dele.
-#
-# O corpo continua sendo o MASCOT de 19x12, e e nele que as poses mexem. O topo
-# entra so na hora de desenhar, entao acessorio nenhum atrapalha as animacoes.
-#
-# Na arte, cada caractere e uma cor: "#" e a cor principal e as letras sao
-# cores extras declaradas pela skin. "." e vazio.
-
-SKINS: dict[str, dict] = {
-    "classico": {
-        "nome": "Clássico",
-        "cores": {"#": "#d97757"},
-    },
-    "monstro": {
-        "nome": "Monstro",
-        "cores": {"#": "#7a9e4f", "a": "#5d7a3c"},
-        "detalhe": "espinhos",
-    },
-    "robo": {
-        "nome": "Robô",
-        "cores": {"#": "#5b86b5", "a": "#8fc2e8", "b": "#d97757"},
-        "topo": ("........#..........", "......aaaaa........"),
-        "detalhe": "visor",
-    },
-    "alien": {
-        "nome": "Alienígena",
-        "cores": {"#": "#8b6bb1", "a": "#c9a6e8"},
-        "topo": ("....a.......a......", ".....a.....a......."),
-    },
-    "ninja": {
-        "nome": "Ninja",
-        "cores": {"#": "#33343d", "a": "#c0392b", "b": "#e8c9a0"},
-        "detalhe": "faixa",
-    },
-    "esqueleto": {
-        "nome": "Esqueleto",
-        "cores": {"#": "#e6e2d3", "a": "#b8b1a0"},
-        "detalhe": "costelas",
-    },
-    "mago": {
-        "nome": "Mago",
-        "cores": {"#": "#7b5ea7", "a": "#5a4180", "b": "#f2c14e"},
-        "topo": (".......aaa.........", "......aaaaa........"),
-        "detalhe": "estrela",
-    },
-    "pirata": {
-        "nome": "Pirata",
-        "cores": {"#": "#d97757", "a": "#2f3136", "b": "#e6e2d3"},
-        "topo": ("....aaaaaaaaa......", "...aaaaaaaaaaa....."),
-        "detalhe": "tapa_olho",
-    },
-    "raposa": {
-        "nome": "Raposa",
-        "cores": {"#": "#e07b39", "a": "#f5ead6", "b": "#3a2b22"},
-        "topo": ("..##.........##....", "..##.........##...."),
-        "detalhe": "focinho",
-    },
-    "cavaleiro": {
-        "nome": "Cavaleiro",
-        "cores": {"#": "#9aa2ab", "a": "#6c737c", "b": "#c0392b"},
-        "topo": (".......bbb.........", "....aaaaaaaaa......"),
-        "detalhe": "viseira",
-    },
-}
-
-SKIN_PADRAO = "classico"
-
-
-def _detalhe_espinhos(linhas) -> None:
-    """Serrilha as bordas laterais, como as pontas do monstro."""
-    for y in (1, 3, 5, 8):
-        linhas[y][2] = "a"
-        linhas[y][16] = "a"
-
-
-def _detalhe_visor(linhas) -> None:
-    """Faixa clara ligando os olhos, como o visor de um robo."""
-    meio = OLHO_LINHAS[1]
-    for x in range(6, 13):
-        linhas[meio][x] = "a"
-
-
-def _detalhe_faixa(linhas) -> None:
-    """Faixa do ninja passando por tras dos olhos."""
-    meio = OLHO_LINHAS[1]
-    for x in range(2, 17):
-        if linhas[meio][x] == "#":
-            linhas[meio][x] = "a"
-
-
-def _detalhe_costelas(linhas) -> None:
-    """Riscos no tronco, para lembrar uma caixa toracica."""
-    for y in (8, 9):
-        for x in (6, 9, 12):
-            linhas[y][x] = "a"
-
-
-def _detalhe_estrela(linhas) -> None:
-    """Um ponto dourado no peito do mago."""
-    linhas[8][9] = "b"
-
-
-def _detalhe_tapa_olho(linhas) -> None:
-    """Cobre o olho esquerdo e deixa a correia atravessada."""
-    for y in OLHO_LINHAS:
-        for x in OLHOS_PADRAO[0]:
-            linhas[y][x] = "a"
-    linhas[OLHO_LINHAS[0]][3] = "a"
-    linhas[OLHO_LINHAS[0]][6] = "a"
-
-
-def _detalhe_focinho(linhas) -> None:
-    """Focinho claro na parte de baixo do rosto."""
-    for x in range(7, 12):
-        linhas[5][x] = "a"
-    linhas[5][9] = "b"
-
-
-def _detalhe_viseira(linhas) -> None:
-    """Fendas verticais da viseira do elmo."""
-    meio = OLHO_LINHAS[1]
-    for x in range(6, 13):
-        linhas[meio][x] = "a"
-    for x in (7, 9, 11):
-        for y in OLHO_LINHAS:
-            linhas[y][x] = "a"
-
-
-DETALHES = {
-    "espinhos": _detalhe_espinhos,
-    "visor": _detalhe_visor,
-    "faixa": _detalhe_faixa,
-    "costelas": _detalhe_costelas,
-    "estrela": _detalhe_estrela,
-    "tapa_olho": _detalhe_tapa_olho,
-    "focinho": _detalhe_focinho,
-    "viseira": _detalhe_viseira,
-}
+# O catalogo em si mora em `ccwidget/skins/`, um arquivo por personagem. Aqui
+# fica so a skin ativa: quem desenha precisa saber qual esta valendo, e trocar
+# de skin invalida as imagens ja rasterizadas.
 
 _SKIN_ATUAL = SKIN_PADRAO
 
@@ -346,31 +212,18 @@ def get_skin() -> str:
 
 
 def compor_skin(arte: tuple[str, ...], skin: str | None = None):
-    """Junta corpo, detalhes e topo da skin.
-
-    Devolve as linhas e quantas delas sao de acessorio, porque o desenho
-    precisa subir para o topo caber sem empurrar o corpo para baixo.
-    """
-    dados = SKINS.get(skin or _SKIN_ATUAL, SKINS[SKIN_PADRAO])
-
-    linhas = [list(l) for l in arte]
-    detalhe = dados.get("detalhe")
-    if detalhe:
-        DETALHES[detalhe](linhas)
-
-    topo = [list(l) for l in dados.get("topo", ())]
-    return tuple("".join(l) for l in topo + linhas), len(topo)
+    """Junta corpo, detalhes e topo da skin ativa (ou da que for pedida)."""
+    return compor(arte, skin or _SKIN_ATUAL)
 
 
 def cores_da_skin(skin: str | None = None) -> dict:
-    dados = SKINS.get(skin or _SKIN_ATUAL, SKINS[SKIN_PADRAO])
-    return dados["cores"]
+    return cores(skin or _SKIN_ATUAL)
 
 
 def pintar(arte: tuple[str, ...], scale: int, bg: str, skin: str | None = None):
     """Rasteriza uma arte ja composta, usando as cores da skin."""
-    cores = cores_da_skin(skin)
-    principal = cores.get("#", P["accent"])
+    paleta = cores_da_skin(skin)
+    principal = paleta.get("#", P["accent"])
     largura = max(len(l) for l in arte)
 
     rows = []
@@ -378,7 +231,7 @@ def pintar(arte: tuple[str, ...], scale: int, bg: str, skin: str | None = None):
         pixels = []
         for x in range(largura):
             ch = linha[x] if x < len(linha) else "."
-            pixels.append(bg if ch == "." else cores.get(ch, principal))
+            pixels.append(bg if ch == "." else paleta.get(ch, principal))
         row = "{" + " ".join(p for p in pixels for _ in range(scale)) + "}"
         rows.extend([row] * scale)
 

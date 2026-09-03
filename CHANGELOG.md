@@ -3,6 +3,46 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.6.0] — 2026-09-03
+
+### Alterado
+
+- **As dez aparências do mascote foram redesenhadas.** O corpo continua o
+  mesmo de 19 × 12 blocos; mudou o que se pinta sobre ele. Toda skin agora
+  ganha luz no alto da cabeça e sombra na base do tronco, e cada personagem
+  ficou com quatro a seis traços próprios em vez de um: o Monstro tem chifres
+  de osso, testa pesada, bocarra com presas e garras; o Robô, antena com
+  lâmpada, visor de vidro emoldurado, grelha e painel com três luzes; o
+  Esqueleto, órbitas fundas, cavidade nasal, dentadura e caixa torácica com
+  esterno; o Pirata, chapéu com caveira e aba que passa da cabeça, tapa-olho,
+  dente de ouro, listras e brinco; a Raposa, orelhas com pelo por dentro,
+  focinho, nariz, bochechas e patas escuras. Os nomes das aparências não
+  mudaram, então a preferência guardada continua valendo.
+- **Cada aparência mora no próprio arquivo**, em `ccwidget/skins/` —
+  `monstro.py`, `raposa.py`, e assim por diante. `base.py` traz as ferramentas
+  de pintura (`corpo()`, `sobrepor()`, `volume()`) e cada traço virou uma
+  função com nome e docstring dentro da skin, no lugar de um registro central
+  de strings. Criar uma aparência nova pede um arquivo e uma linha no
+  `__init__.py` do pacote. `theme.py` encolheu de 1.266 para 821 linhas.
+- O teto de acessório subiu para três linhas acima da cabeça, o que deu altura
+  de mago ao chapéu do Mago e aba de verdade ao do Pirata.
+
+### Adicionado
+
+- `scripts/render_skins.py` regenera `docs/mascote.png` e `docs/skins.png` a
+  partir do código das skins, para a documentação nunca divergir do que o
+  widget desenha. É ferramenta de desenvolvimento e pede Pillow; o widget
+  continua sem dependências fora da biblioteca padrão.
+
+### Corrigido
+
+- Acessório alto cortava o mascote. No cabeçalho o desenho era encaixado num
+  quadro fixo de 12 linhas e as pernas ficavam de fora; no círculo do modo
+  minimizado o corpo descia meia altura de chapéu. As duas telas agora se
+  dimensionam pela imagem e aplicam o deslocamento do acessório, então o corpo
+  fica na mesma altura com ou sem chapéu — e a animação de entrada acerta o
+  ponto de chegada no cabeçalho.
+
 ## [0.5.0] — 2026-09-03
 
 ### Adicionado

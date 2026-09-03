@@ -86,8 +86,12 @@ Claro e escuro, seguindo o Windows por padrão. Fixe um dos dois no menu.
 
 ## Mascote
 
-Dez aparências em **⚙ › Mascote**. Cada uma tem cores próprias, detalhes no
-corpo e acessórios — chapéu, antenas, orelhas — desenhados acima dele.
+Dez aparências em **⚙ › Mascote**. Todas partem do mesmo corpo de 19 × 12
+blocos e mudam só o que se pinta sobre ele: cores próprias, luz no alto e
+sombra embaixo, traços dentro do corpo — bocarra, viseira, costelas, focinho —
+e acessórios de até três linhas acima da cabeça.
+
+Cada aparência mora no próprio arquivo, em `ccwidget/skins/`.
 
 <div align="center">
 <img src="docs/skins.png" width="640" alt="As dez aparências do mascote">
@@ -123,12 +127,13 @@ ccwidget/
   usage_cli.py     roda o `claude -p /usage` e interpreta a saída
   state.py         lê e grava o último resultado
   theme.py         paletas, mascote e formas com antialiasing
+  skins/           uma aparência por arquivo; base.py traz as ferramentas
   ui.py            o widget tkinter
   config.py        preferências
   update_check.py  lê a versão publicada e monta o comando de atualização
   __main__.py      entrada (widget / usage / report)
 run_widget.pyw     abre sem console
-scripts/           install.ps1, uninstall.ps1 e as funções comuns
+scripts/           install.ps1, uninstall.ps1, funções comuns e render_skins.py
 assets/            ícone do mascote (.ico)
 ```
 
@@ -161,4 +166,4 @@ python -m ccwidget report
 
 MIT — veja [LICENSE](LICENSE). Histórico em [CHANGELOG.md](CHANGELOG.md).
 
-Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC; o mascote é desenhado em código (`ccwidget/theme.py`), nenhum arquivo de marca acompanha o repositório. O projeto apenas executa um comando público do CLI e lê o resultado.
+Sem vínculo com a Anthropic. "Claude" é marca da Anthropic, PBC; o mascote é desenhado em código (`ccwidget/theme.py` e `ccwidget/skins/`), nenhum arquivo de marca acompanha o repositório. O projeto apenas executa um comando público do CLI e lê o resultado.
