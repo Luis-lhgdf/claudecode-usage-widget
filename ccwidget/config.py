@@ -25,13 +25,25 @@ class Config:
     # --- atualizacao -------------------------------------------------------
     refresh_seconds: int = 20
     # Intervalo entre consultas automaticas ao `claude -p /usage`, em minutos.
-    # 0 desliga e deixa a busca so no menu. O comando nao consome tokens, mas
-    # inicia o CLI a cada vez, entao nao vale rodar de minuto em minuto.
-    usage_refresh_minutes: int = 10
+    # Aceita fracao: 0.5 sao os 30 segundos oferecidos no menu. 0 deixa a busca
+    # so no menu -- mas a primeira consulta, ao abrir a janela, acontece de
+    # qualquer forma. O comando nao consome tokens; inicia o CLI a cada vez,
+    # entao os intervalos curtos cobram alguns segundos de CPU por consulta.
+    usage_refresh_minutes: float = 10
 
     # Versao registrada pelo instalador, para ele saber o que ja esta na
     # maquina e decidir entre instalar, atualizar ou reinstalar.
     installed_version: str | None = None
+
+    # --- aviso de versao nova ----------------------------------------------
+    # Uma vez por dia o widget le a versao publicada no GitHub e avisa quando
+    # ha uma mais nova que a instalada. Desligado, nenhuma requisicao sai da
+    # maquina. Veja ccwidget/update_check.py.
+    update_check: bool = True
+    # Quando foi a ultima consulta e o que ela devolveu. O resultado fica
+    # guardado para o aviso aparecer nas aberturas seguintes sem rede.
+    update_checked_at: float = 0.0
+    update_latest: str | None = None
 
     # --- janela ------------------------------------------------------------
     # mode: "mini" (so o circulo) ou "panel" (sessao e semana).

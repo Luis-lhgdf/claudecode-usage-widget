@@ -16,9 +16,38 @@ LABELS = {
 }
 
 
+def _glifos() -> tuple[str, str, str]:
+    """Cheio, vazio e regua, conforme o que o console aceita.
+
+    O terminal do Windows costuma vir em cp1252 ou cp850, onde "█" e "─" nao
+    existem: imprimir direto levantava UnicodeEncodeError e a saida morria no
+    meio da primeira linha. Onde os blocos nao cabem, desenhamos com ASCII.
+    """
+    encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+    try:
+        "█░─".encode(encoding)
+    except (UnicodeEncodeError, LookupError):
+        return "#", ".", "-"
+    return "█", "░", "─"
+
+
+def _preparar_saida() -> None:
+    """Rede de seguranca para o resto do texto: acentos nunca quebram a saida.
+
+    Os glifos escolhidos por `_glifos` cobrem o desenho; isto cobre o que
+    sobra -- um "ã" num console que nao o tenha vira "?" em vez de derrubar o
+    comando.
+    """
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def _bar(pct: float, width: int = 28) -> str:
+    cheio, vazio, _ = _glifos()
     filled = int(round(min(max(pct, 0), 100) / 100 * width))
-    return "█" * filled + "░" * (width - filled)
+    return cheio * filled + vazio * (width - filled)
 
 
 def _report() -> None:
@@ -30,10 +59,11 @@ def _report() -> None:
 
     tz = local_timezone()
     live = read_state()
+    regua = _glifos()[2] * 46
 
     print()
     print("  USO DO CLAUDE CODE")
-    print("  " + "─" * 46)
+    print("  " + regua)
 
     if not live.available:
         print("  Nenhuma consulta ainda — rode: python -m ccwidget usage")
@@ -51,7 +81,7 @@ def _report() -> None:
             clock = datetime.fromtimestamp(window.resets_at, tz=tz)
             print(f"            reinicia {clock:%d/%m %H:%M}")
 
-    print("  " + "─" * 46)
+    print("  " + regua)
     idade = int(live.age_seconds)
     quando = "agora" if idade < 60 else f"há {idade // 60} min"
     print(f"  /usage consultado {quando}{' (dado antigo)' if live.stale else ''}")
@@ -76,6 +106,7 @@ def _usage() -> None:
 
 
 def main() -> None:
+    _preparar_saida()
     command = sys.argv[1] if len(sys.argv) > 1 else ""
 
     if command == "report":

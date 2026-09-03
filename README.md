@@ -35,15 +35,15 @@ cd claudecode-usage-widget
 .\scripts\install.ps1
 ```
 
-O instalador cria os atalhos, registra a versão e abre o widget. Clicar no atalho de novo não abre uma segunda cópia — traz a que já está aberta para frente.
+O instalador cria o atalho na área de trabalho, registra a versão e abre o widget. Ele não coloca nada na inicialização do Windows — o widget abre quando você clicar. Clicar no atalho de novo não abre uma segunda cópia: traz a que já está aberta para frente.
 
 | Arquivo | Para que serve |
 |---|---|
-| `scripts/install.ps1` | **Instala.** Cria dois atalhos com o ícone do mascote — um na pasta Inicializar, para subir com o Windows, outro na área de trabalho — e abre o widget. Rodar de novo é seguro: compara a versão do repositório com a registrada e diz se é instalação, atualização ou reinstalação |
-| `scripts/uninstall.ps1` | **Desinstala.** Fecha o widget e remove os atalhos. As preferências ficam; `-Tudo` apaga `~/.ccwidget` também |
+| `scripts/install.ps1` | **Instala.** Cria o atalho da área de trabalho com o ícone do mascote e abre o widget. Rodar de novo é seguro: compara a versão do repositório com a registrada e diz se é instalação, atualização ou reinstalação |
+| `scripts/uninstall.ps1` | **Desinstala.** Fecha o widget e remove o atalho. Pergunta no terminal se as preferências ficam ou se `~/.ccwidget` vai embora também (`-Manter` e `-Tudo` respondem de antemão) |
 | `run_widget.pyw` | **Abre o widget** sem passar pelo instalador. A extensão `.pyw` faz o Windows usar `pythonw.exe`, sem janela de console |
 
-Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o widget na versão nova.
+Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o widget na versão nova. Não é preciso lembrar de conferir: uma vez por dia o widget lê a versão publicada no GitHub e avisa no painel quando há uma mais nova, com o comando pronto para copiar (**⚙ › Avisar de novas versões** desliga a checagem, e com ela qualquer acesso à rede).
 
 ## Modos
 
@@ -59,7 +59,8 @@ Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o
 | Ação | Resultado |
 |---|---|
 | `↻` | Consulta o `/usage` agora |
-| `⚙` ou botão direito | Menu: modo, tema, mascote, intervalo, opacidade, animações |
+| `⚙` ou botão direito | Menu: modo, tema, mascote, intervalo, opacidade, animações, aviso de versão |
+| `↑ Versão x.y.z disponível` | Abre o comando de atualização, com botão para copiar |
 | `─` | Minimiza para o círculo |
 | `✕` ou `Esc` | Fecha |
 | Arrastar cabeçalho ou círculo | Move |
@@ -67,7 +68,7 @@ Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o
 
 ## De onde vêm os números
 
-Uma fonte só, a oficial: o widget roda `claude -p "/usage"` e interpreta a saída. É comando local, sem resposta de modelo — **não consome tokens**. Roda a cada 10 minutos (ajustável no menu) e sob demanda no `↻`.
+Uma fonte só, a oficial: o widget roda `claude -p "/usage"` e interpreta a saída. É comando local, sem resposta de modelo — **não consome tokens**. A primeira consulta sai ao abrir a janela; depois roda a cada 10 minutos (no menu: 30 s, 1, 2, 5, 10, 15, 30, 60 minutos ou só manual) e sob demanda no `↻`.
 
 Durante a consulta a seta gira e as barras viram um segmento correndo na pista. Sem dado, o widget mostra `--` e diz que não tem dado — ele não estima consumo por conta própria.
 
@@ -113,29 +114,31 @@ python -m ccwidget report    # imprime os percentuais
 
 ## Configuração
 
-Tudo em `~/.ccwidget/config.json`: modo, tema, posição, opacidade, `usage_refresh_minutes` (`0` desliga a consulta automática) e a versão instalada. O menu cobre as preferências; a versão quem escreve é o instalador.
+Tudo em `~/.ccwidget/config.json`: modo, tema, posição, opacidade, `usage_refresh_minutes` (`0` deixa a consulta só no menu, mas a primeira, ao abrir, acontece de qualquer forma), `update_check` (`false` desliga o aviso de versão nova e qualquer acesso à rede) e a versão instalada. O menu cobre as preferências; a versão quem escreve é o instalador.
 
 ## Estrutura
 
 ```
 ccwidget/
-  usage_cli.py   roda o `claude -p /usage` e interpreta a saída
-  state.py       lê e grava o último resultado
-  theme.py       paletas, mascote e formas com antialiasing
-  ui.py          o widget tkinter
-  config.py      preferências
-  __main__.py    entrada (widget / usage / report)
-run_widget.pyw   abre sem console
-scripts/         install.ps1, uninstall.ps1 e as funções comuns
-assets/          ícone do mascote (.ico)
+  usage_cli.py     roda o `claude -p /usage` e interpreta a saída
+  state.py         lê e grava o último resultado
+  theme.py         paletas, mascote e formas com antialiasing
+  ui.py            o widget tkinter
+  config.py        preferências
+  update_check.py  lê a versão publicada e monta o comando de atualização
+  __main__.py      entrada (widget / usage / report)
+run_widget.pyw     abre sem console
+scripts/           install.ps1, uninstall.ps1 e as funções comuns
+assets/            ícone do mascote (.ico)
 ```
 
 ## Desinstalar
 
 ```powershell
-.\scripts\uninstall.ps1          # remove os atalhos, mantém as preferências
-.\scripts\uninstall.ps1 -Tudo    # remove também ~/.ccwidget
+.\scripts\uninstall.ps1
 ```
+
+Ele pergunta no terminal o que fazer com as preferências — manter, para uma reinstalação devolver o widget como estava, ou apagar `~/.ccwidget` junto — e cancela sem tocar em nada se você mudar de ideia. Para responder de antemão, em scripts: `-Manter` ou `-Tudo`.
 
 ---
 
@@ -143,7 +146,7 @@ assets/          ícone do mascote (.ico)
 
 Floating desktop widget for Claude Code limits — 5-hour session window and weekly limit, always on top, minimized ring or full panel, light and dark themes.
 
-Numbers come from one official source: the widget runs `claude -p "/usage"` and parses its output. Local command, no model response, no tokens spent; every 10 minutes (configurable) and on demand. It never estimates usage on its own — with no data, it says so.
+Numbers come from one official source: the widget runs `claude -p "/usage"` and parses its output. Local command, no model response, no tokens spent; on open, then every 10 minutes (configurable: 30 s to 1 h, or manual only) and on demand. It never estimates usage on its own — with no data, it says so.
 
 Requires the Claude Code CLI on `PATH` and Python 3.10+. No packages to install. **Interface is in Portuguese.**
 

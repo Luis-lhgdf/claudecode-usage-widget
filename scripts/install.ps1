@@ -3,14 +3,13 @@
     Instala o CC Widget.
 
 .DESCRIPTION
-    Cria dois atalhos para run_widget.pyw: um na pasta Inicializar, para o
-    widget subir junto com o Windows, e outro na area de trabalho. Ambos usam
-    pythonw.exe -- nenhuma janela de console aparece -- e levam o icone do
-    mascote.
+    Cria o atalho de run_widget.pyw na area de trabalho, com pythonw.exe --
+    nenhuma janela de console aparece -- e o icone do mascote. O widget nao
+    sobe mais junto com o Windows: quem abre e o atalho, quando voce quiser.
 
     Rodar de novo e seguro: o script compara a versao do repositorio com a que
     esta registrada na maquina e diz se e instalacao, atualizacao ou
-    reinstalacao, substituindo os atalhos de qualquer forma.
+    reinstalacao, substituindo o atalho de qualquer forma.
 
     Ao terminar, abre o widget -- reiniciando a copia aberta quando a versao
     muda, para o que esta na tela ser a versao recem instalada.
@@ -55,7 +54,7 @@ Invoke-ComRelatorio -NoPause:$NoPause -Corpo {
             Write-Host "diretorio ($versao). Instalando a deste diretorio." -ForegroundColor Yellow
         }
         default {
-            Write-Host "Versao $versao ja instalada. Substituindo os atalhos." -ForegroundColor Cyan
+            Write-Host "Versao $versao ja instalada. Substituindo o atalho." -ForegroundColor Cyan
         }
     }
 
@@ -64,10 +63,17 @@ Invoke-ComRelatorio -NoPause:$NoPause -Corpo {
     foreach ($a in $atalhos) {
         New-Atalho -Caminho $a.Caminho -Pythonw $pythonw -Alvo $alvo -Repo $repo
     }
+
+    # Instalacoes antigas deixaram um atalho na pasta Inicializar; sem remover,
+    # o widget continuaria subindo com o Windows depois desta atualizacao.
+    foreach ($nome in (Remove-AtalhosLegado)) {
+        Write-Host "Removido o atalho de $nome (o widget nao sobe mais com o Windows)." -ForegroundColor Yellow
+    }
+
     Set-VersaoInstalada -Versao $versao
 
     Write-Host ""
-    Write-Host "Atalhos:" -ForegroundColor Green
+    Write-Host "Atalho:" -ForegroundColor Green
     foreach ($a in $atalhos) {
         Write-Host ("  {0,-17} {1}" -f $a.Nome, $a.Caminho) -ForegroundColor DarkGray
     }

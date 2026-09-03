@@ -3,6 +3,70 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.5.0] — 2026-09-03
+
+### Adicionado
+
+- Aviso de versão nova. Uma vez por dia o widget lê a versão publicada no
+  GitHub e, se for maior que a instalada, mostra uma faixa no painel
+  (**↑ Versão x.y.z disponível**) e transforma o rodapé do menu em
+  **CC Widget a.b.c › atualizar para x.y.z**. Clicar em qualquer um dos dois
+  abre uma janelinha com o comando de atualização (`git pull` e o instalador) e
+  um botão para copiá-lo. A resposta fica guardada em `~/.ccwidget/config.json`,
+  então o aviso reaparece nas aberturas seguintes até você atualizar — e some
+  sozinho quando a versão local alcança a publicada.
+- Interruptor **Avisar de novas versões** no menu. Desligado, nenhuma
+  requisição sai da máquina. A consulta é um GET de um arquivo de texto público
+  (`ccwidget/__init__.py` no repositório), roda numa thread com 8 s de limite e
+  qualquer falha — sem rede, proxy no caminho, GitHub fora — é engolida em
+  silêncio.
+
+### Corrigido
+
+- `python -m ccwidget report` quebrava com `UnicodeEncodeError` em console
+  cp1252: `█`, `░` e `─` não existem nessa página de código, e a saída morria na
+  primeira linha. Agora o desenho se adapta ao que o console aceita (blocos em
+  UTF-8, cp437 e cp850; `#`, `.` e `-` onde eles não cabem), e o resto do texto
+  vai com `errors="replace"` para nunca derrubar o comando.
+
+## [0.4.0] — 2026-09-03
+
+### Removido
+
+- O widget não sobe mais junto com o Windows. O instalador criava um atalho na
+  pasta Inicializar, e subir no login — junto com todo o resto — deixava a
+  máquina travada nos primeiros minutos. Agora só existe o atalho da área de
+  trabalho: o widget abre quando você quiser. O instalador e o desinstalador
+  apagam o atalho que ficou de versões anteriores.
+
+### Adicionado
+
+- Intervalos curtos em **⚙ › Atualizar a cada**: 30 segundos, 1, 2 e 5 minutos,
+  ao lado dos que já existiam. Cada consulta inicia o CLI do Claude Code, então
+  os intervalos curtos cobram alguns segundos de CPU de cada vez.
+- O desinstalador pergunta no terminal o que fazer com as preferências —
+  manter, apagar `~/.ccwidget` junto, ou cancelar sem mexer em nada — em vez de
+  exigir o parâmetro `-Tudo` de quem abre o script com um duplo clique. Os
+  parâmetros continuam valendo (`-Tudo`, e agora `-Manter`) e dispensam a
+  pergunta; sem console para perguntar, as preferências ficam.
+
+### Alterado
+
+- A primeira consulta ao `/usage` acontece ao abrir a janela, sem esperar
+  clique no botão de atualizar. Vale mesmo com o intervalo em **Só manual**;
+  reabrir logo depois de fechar não consulta de novo, porque o dado em disco
+  ainda serve.
+
+### Corrigido
+
+- Durações abaixo de um minuto aparecem em segundos (`40 s`) no lugar de
+  `0 min` — visível na conta até a próxima consulta com o intervalo em 30
+  segundos.
+- Escolher um intervalo no menu **Atualizar a cada** passou a reagendar o laço
+  de consultas. Antes só o relógio do rodapé mudava: o laço seguia na cadência
+  anterior e, vindo de **Só manual**, não havia laço nenhum para reagendar — a
+  contagem chegava a zero e nada acontecia.
+
 ## [0.3.0] — 2026-09-02
 
 ### Adicionado

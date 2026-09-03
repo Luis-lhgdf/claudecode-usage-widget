@@ -6,11 +6,48 @@
 #>
 
 function Get-Atalhos {
-    <# Os dois lugares onde o atalho do widget e criado. #>
+    <# Onde o atalho do widget e criado. #>
     @(
-        @{ Nome = "Inicializar";      Caminho = Join-Path ([Environment]::GetFolderPath("Startup")) "CC Widget.lnk" }
         @{ Nome = "Area de Trabalho"; Caminho = Join-Path ([Environment]::GetFolderPath("Desktop")) "CC Widget.lnk" }
     )
+}
+
+
+function Get-AtalhosLegado {
+    <#
+        Atalhos que versoes anteriores criavam e hoje nao existem mais: o
+        widget subia junto com o Windows e pesava no login. Instalador e
+        desinstalador removem o que ficou para tras.
+    #>
+    @(
+        @{ Nome = "Inicializar"; Caminho = Join-Path ([Environment]::GetFolderPath("Startup")) "CC Widget.lnk" }
+    )
+}
+
+
+function Remove-AtalhosLegado {
+    <#
+        Remove os atalhos legados e devolve os nomes dos lugares onde havia
+        um. Quem nao sai -- arquivo travado, permissao -- e apontado na hora,
+        com o caminho, porque deixar um atalho na Inicializar em silencio
+        manteria o widget subindo com o Windows.
+
+        A confirmacao vem do Remove-Item, nao de um Test-Path depois dele: a
+        pasta Inicializar e observada pelo Explorer e o arquivo ainda aparece
+        por um instante depois de sair.
+    #>
+    $removidos = @()
+    foreach ($a in (Get-AtalhosLegado)) {
+        if (-not (Test-Path $a.Caminho)) { continue }
+        try {
+            Remove-Item $a.Caminho -Force -ErrorAction Stop
+            $removidos += $a.Nome
+        } catch {
+            Write-Host "Nao consegui remover o atalho de $($a.Nome): $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "Apague na mao: $($a.Caminho)" -ForegroundColor Yellow
+        }
+    }
+    return ,$removidos
 }
 
 
@@ -128,6 +165,61 @@ function Invoke-ComRelatorio {
         }
     }
     if ($falhou) { exit 1 }
+}
+
+
+function Test-Interativo {
+    <#
+        Ha alguem do outro lado para responder uma pergunta? Sem console ou
+        com a entrada redirecionada -- chamado de outro script, de um pipe --
+        perguntar travaria a execucao, esperando um Enter que nunca vem.
+    #>
+    try {
+        if (-not [Environment]::UserInteractive) { return $false }
+        if ([Console]::IsInputRedirected) { return $false }
+    } catch {
+        return $false
+    }
+    return $true
+}
+
+
+function Read-EscolhaDesinstalar {
+    <#
+        Menu de desinstalacao no proprio terminal, para quem abre o script com
+        "Executar com PowerShell" e nao tem onde passar parametros. Devolve
+        "manter", "tudo" ou "cancelar".
+    #>
+    $pasta = Split-Path (Get-ConfigPath)
+
+    Write-Host ""
+    Write-Host "  Como desinstalar o CC Widget?" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "    1  Manter as preferencias" -ForegroundColor White
+    Write-Host "       Fecha o widget e remove o atalho. Modo, tema, posicao e" -ForegroundColor DarkGray
+    Write-Host "       opacidade ficam, e uma reinstalacao devolve tudo como estava." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "    2  Remover tudo" -ForegroundColor White
+    Write-Host "       O mesmo, e apaga $pasta" -ForegroundColor DarkGray
+    Write-Host "       (preferencias e ultimo resultado do /usage)." -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "    3  Cancelar" -ForegroundColor White
+    Write-Host ""
+
+    for ($tentativa = 1; $tentativa -le 3; $tentativa++) {
+        $resposta = (Read-Host "  Escolha [1]").Trim()
+        if (-not $resposta) { return "manter" }
+        switch ($resposta) {
+            "1" { return "manter" }
+            "2" { return "tudo" }
+            "3" { return "cancelar" }
+            default {
+                Write-Host "  Nao entendi '$resposta'. Digite 1, 2 ou 3." -ForegroundColor Yellow
+            }
+        }
+    }
+    # Tres respostas invalidas: cancelar e mais seguro que adivinhar.
+    return "cancelar"
 }
 
 

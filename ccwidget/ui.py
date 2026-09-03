@@ -8,10 +8,11 @@ Dois modos, alternados pelo menu da engrenagem:
 * **mini**   -- so um circulo flutuante com o mascote e o anel da sessao.
 * **painel** -- sessao de 5 horas e limite semanal, livre na tela.
 
-Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`. A consulta
-acontece sozinha a cada dez minutos por padrao -- o intervalo e ajustavel pelo
-menu -- e sob demanda no botao de atualizar. O widget nao estima consumo por
-conta propria: sem dado, ele diz que nao tem dado.
+Os numeros vem de uma unica fonte, a oficial: `claude -p "/usage"`. A primeira
+consulta sai ao abrir a janela; depois acontece sozinha a cada dez minutos por
+padrao -- o intervalo e ajustavel pelo menu -- e sob demanda no botao de
+atualizar. O widget nao estima consumo por conta propria: sem dado, ele diz que
+nao tem dado.
 """
 
 from __future__ import annotations
@@ -23,6 +24,12 @@ import tkinter as tk
 from datetime import datetime
 
 from . import __version__
+from .update_check import (
+    CHECK_EVERY_SECONDS,
+    comando_de_atualizacao,
+    fetch_latest,
+    nova_versao,
+)
 from .config import Config, local_timezone
 from .single_instance import serve
 from .state import read_state
@@ -123,9 +130,13 @@ def fmt_duration_short(seconds: int) -> str:
 
 
 def fmt_duration(seconds: int) -> str:
-    """Duracao curta em portugues: '2h05', '17 min', 'agora'."""
+    """Duracao curta em portugues: '2h05', '17 min', '40 s', 'agora'."""
     if seconds <= 0:
         return "agora"
+    if seconds < 60:
+        # Com o intervalo de consulta em 30 segundos a conta do rodape cai
+        # aqui, e "0 min" nao diria nada.
+        return f"{seconds} s"
     minutes = seconds // 60
     hours, minutes = divmod(minutes, 60)
     if hours:
@@ -375,13 +386,6 @@ class UsageWidget(tk.Tk):
         self._saindo = False
         self.palco = None
         self.viajante = None
-        self._saindo = False
-        self.palco = None
-        self.viajante = None
-        self._popup_opacidade = None
-        self._saindo = False
-        self.palco = None
-        self.viajante = None
         self.cfg = Config.load()
         self.theme = set_theme(self.cfg.theme)
         self.skin = set_skin(self.cfg.skin)
@@ -394,7 +398,16 @@ class UsageWidget(tk.Tk):
         self._cli_busy = False
         self._cli_error: str | None = None
         self._next_usage_at: float | None = None
+        self._usage_job: str | None = None
         self._spin_frame = 0
+        self._popup_atualizacao = None
+        # O aviso comeca com o que a ultima consulta deixou guardado, para
+        # aparecer ja na abertura, antes de qualquer acesso a rede.
+        self._nova_versao = (
+            nova_versao(self.cfg.update_latest) if self.cfg.update_check else None
+        )
+        self._versao_remota: str | None = None
+        self._checagem_pronta = False
 
         self._setup_window()
         self._build()
@@ -406,7 +419,9 @@ class UsageWidget(tk.Tk):
             self.after(60, self._comecar_entrada)
         self.after(200, self._tick)
         self.after(250, self._atender_pedido_foco)
-        self.after(600, self._schedule_usage)
+        self.after(600, self._primeira_consulta)
+        # Depois da consulta ao /usage: o numero na tela vem primeiro.
+        self.after(2500, self._checar_atualizacao)
         self._agendar_gracinha()
 
     # ------------------------------------------------------------- estrutura
@@ -499,6 +514,18 @@ class UsageWidget(tk.Tk):
             font=("Segoe UI", 7), wraplength=WIDTH - PAD * 2,
         )
 
+        # Faixa do aviso de versao nova: criada sempre, mostrada so quando ha
+        # novidade -- por isso nao entra no pack aqui.
+        self.aviso_versao = tk.Label(
+            root, text="", bg=P["bg"], fg=P["accent"], anchor="w", justify="left",
+            font=("Segoe UI", 7, "bold"), cursor="hand2",
+            wraplength=WIDTH - PAD * 2,
+        )
+        self.aviso_versao.bind("<Button-1>", lambda _e: self._abrir_atualizacao())
+        # A interface e reconstruida ao trocar tema ou mascote, e o rotulo
+        # novo nasce fora do pack: a marca acompanha o widget, nao a janela.
+        self._aviso_mostrado = False
+
         for widget in (header, self.dot, self.heading):
             widget.bind("<Button-1>", self._drag_start)
             widget.bind("<B1-Motion>", self._drag_move)
@@ -539,7 +566,13 @@ class UsageWidget(tk.Tk):
         self.var_top = tk.BooleanVar(value=self.cfg.always_on_top)
         self.var_anim = tk.BooleanVar(value=self.cfg.animations)
         self.var_skin = tk.StringVar(value=self.skin)
-        self.var_interval = tk.IntVar(value=self.cfg.usage_refresh_minutes)
+        self.var_update = tk.BooleanVar(value=self.cfg.update_check)
+        # DoubleVar, e nao IntVar: o intervalo de 30 segundos vale 0.5 minuto.
+        # O float() importa: o tkinter compara variavel e opcao como texto, e
+        # um 10 inteiro na configuracao nao casaria com o 10.0 do menu.
+        self.var_interval = tk.DoubleVar(
+            value=float(self.cfg.usage_refresh_minutes or 0)
+        )
 
         for label, value in (("Minimizado", "mini"), ("Painel", "panel")):
             self.menu.add_radiobutton(
@@ -578,12 +611,15 @@ class UsageWidget(tk.Tk):
             activebackground=P["accent"], activeforeground=P["menu_fg"],
         )
         for label, value in (
-            ("5 minutos", 5),
-            ("10 minutos", 10),
-            ("15 minutos", 15),
-            ("30 minutos", 30),
-            ("1 hora", 60),
-            ("Só manual", 0),
+            ("30 segundos", 0.5),
+            ("1 minuto", 1.0),
+            ("2 minutos", 2.0),
+            ("5 minutos", 5.0),
+            ("10 minutos", 10.0),
+            ("15 minutos", 15.0),
+            ("30 minutos", 30.0),
+            ("1 hora", 60.0),
+            ("Só manual", 0.0),
         ):
             interval_menu.add_radiobutton(
                 label=label, value=value, variable=self.var_interval,
@@ -597,11 +633,17 @@ class UsageWidget(tk.Tk):
         self.menu.add_checkbutton(
             label="Animações", variable=self.var_anim, command=self._toggle_anim
         )
+        self.menu.add_checkbutton(
+            label="Avisar de novas versões", variable=self.var_update,
+            command=self._toggle_update_check,
+        )
         self.menu.add_command(label="Opacidade…", command=self._abrir_opacidade)
         self.menu.add_separator()
         self.menu.add_command(label="Fechar", command=self.quit_widget)
         self.menu.add_separator()
         self.menu.add_command(label=f"CC Widget {__version__}", state="disabled")
+        self._menu_versao_idx = self.menu.index("end")
+        self._atualizar_item_versao()
 
     # ------------------------------------------------------------------ modos
 
@@ -914,16 +956,35 @@ class UsageWidget(tk.Tk):
         finally:
             self.menu.grab_release()
 
-    def _set_interval(self, minutes: int) -> None:
+    def _set_interval(self, minutes: float) -> None:
         """Troca o intervalo entre consultas automaticas, pelo menu."""
         self.cfg.usage_refresh_minutes = minutes
         self.cfg.save()
-        self._next_usage_at = time.time() + minutes * 60 if minutes else None
+        # Reagendar de fato: so mexer no relogio do rodape deixava o laco na
+        # cadencia antiga -- e, saindo de "So manual", sem laco nenhum.
+        if self._usage_job is not None:
+            self.after_cancel(self._usage_job)
+            self._usage_job = None
+        self._schedule_usage()
         self._render_footer()
 
     def _toggle_anim(self) -> None:
         self.cfg.animations = self.var_anim.get()
         self.cfg.save()
+
+    def _toggle_update_check(self) -> None:
+        """Liga e desliga o aviso de versao nova, no menu.
+
+        Desligado, o aviso sai da tela na hora e nenhuma requisicao e feita.
+        """
+        self.cfg.update_check = self.var_update.get()
+        self.cfg.save()
+        if self.cfg.update_check:
+            self._checar_atualizacao()
+            return
+        self._nova_versao = None
+        self._atualizar_item_versao()
+        self._render()
 
     def _toggle_top(self) -> None:
         self.cfg.always_on_top = self.var_top.get()
@@ -1103,15 +1164,212 @@ class UsageWidget(tk.Tk):
         self._render()
         self.after(max(self.cfg.refresh_seconds, 5) * 1000, self._tick)
 
+    def _primeira_consulta(self) -> None:
+        """Busca os percentuais na abertura, antes de qualquer clique.
+
+        Vale mesmo com o intervalo em "So manual": o widget existe para dizer
+        o consumo, e sem isto ele estreava com "sem dados ainda", esperando o
+        primeiro clique em atualizar. Reabrir logo depois de fechar nao
+        consulta de novo -- o dado em disco ainda serve.
+        """
+        if not self.live.available or self.live.stale:
+            self._kick_usage_cli()
+        self._schedule_usage()
+
+    def _intervalo_usage(self) -> int:
+        """Intervalo entre consultas automaticas em segundos; 0 e so manual.
+
+        A configuracao esta em minutos e aceita fracao -- 0.5 sao os 30
+        segundos do menu --, entao a conta nao pode passar por int(minutos).
+        """
+        try:
+            minutos = float(self.cfg.usage_refresh_minutes or 0)
+        except (TypeError, ValueError):
+            minutos = 0.0
+        return max(int(round(minutos * 60)), 0)
+
     def _schedule_usage(self) -> None:
         """Consulta o /usage se o dado estiver velho, e reagenda."""
-        minutes = max(int(self.cfg.usage_refresh_minutes or 0), 0)
-        if not minutes:
+        self._usage_job = None
+        segundos = self._intervalo_usage()
+        if not segundos:
+            self._next_usage_at = None
             return
-        if self.live.age_seconds > minutes * 60:
+        if self.live.age_seconds > segundos:
             self._kick_usage_cli()
-        self._next_usage_at = time.time() + minutes * 60
-        self.after(minutes * 60_000, self._schedule_usage)
+        self._next_usage_at = time.time() + segundos
+        self._usage_job = self.after(segundos * 1000, self._schedule_usage)
+
+    # ------------------------------------------------------------ versao nova
+
+    def _checar_atualizacao(self) -> None:
+        """Le a versao publicada, no maximo uma vez por dia.
+
+        A resposta guardada na configuracao ja aparece na tela; a consulta so
+        acontece quando ela envelheceu.
+        """
+        if not self.cfg.update_check:
+            return
+        self._atualizar_item_versao()
+        self._render()
+
+        idade = time.time() - (self.cfg.update_checked_at or 0.0)
+        if 0 <= idade < CHECK_EVERY_SECONDS:
+            return
+
+        self._checagem_pronta = False
+        threading.Thread(target=self._worker_atualizacao, daemon=True).start()
+        self.after(1000, self._colher_atualizacao)
+
+    def _worker_atualizacao(self) -> None:
+        # Nada de widgets a partir daqui: tkinter nao e seguro para uso
+        # concorrente. A thread so deixa o resultado na gaveta.
+        self._versao_remota = fetch_latest()
+        self._checagem_pronta = True
+
+    def _colher_atualizacao(self, tentativa: int = 0) -> None:
+        """Pega o resultado da thread na thread da interface.
+
+        Mesmo desenho de `_animate_loading`: quem toca nos widgets e o laco do
+        tkinter, nao a thread. Passadas as tentativas -- rede travada alem do
+        timeout --, desiste sem registrar a consulta, e a proxima abertura
+        tenta de novo.
+        """
+        if not self._checagem_pronta:
+            if tentativa < 30:
+                self.after(1000, lambda: self._colher_atualizacao(tentativa + 1))
+            return
+
+        # A data e gravada mesmo quando a consulta falha: sem rede, insistir a
+        # cada abertura nao ajudaria em nada.
+        self.cfg.update_checked_at = time.time()
+        if self._versao_remota:
+            self.cfg.update_latest = self._versao_remota
+        self.cfg.save()
+
+        self._nova_versao = nova_versao(self.cfg.update_latest)
+        self._atualizar_item_versao()
+        self._render()
+
+    def _atualizar_item_versao(self) -> None:
+        """Rodape do menu: informa a versao e, havendo outra, leva a ela."""
+        try:
+            if self._nova_versao:
+                self.menu.entryconfigure(
+                    self._menu_versao_idx,
+                    label=f"CC Widget {__version__}  ›  atualizar para "
+                          f"{self._nova_versao}",
+                    state="normal",
+                    command=self._abrir_atualizacao,
+                )
+            else:
+                self.menu.entryconfigure(
+                    self._menu_versao_idx,
+                    label=f"CC Widget {__version__}",
+                    state="disabled",
+                )
+        except (tk.TclError, AttributeError):
+            pass  # menu em reconstrucao; o proximo _build_menu poe o rotulo
+
+    def _render_aviso_versao(self) -> None:
+        """Mostra ou esconde a faixa do aviso, no painel."""
+        mostrar = bool(self._nova_versao) and self.mode != "mini"
+        if mostrar == self._aviso_mostrado:
+            return
+        try:
+            if mostrar:
+                self.aviso_versao.configure(
+                    text=f"↑ Versão {self._nova_versao} disponível"
+                         " · clique para atualizar"
+                )
+                self.aviso_versao.pack(
+                    fill="x", padx=PAD, pady=(9, 0), before=self.footer
+                )
+            else:
+                self.aviso_versao.pack_forget()
+        except (tk.TclError, AttributeError):
+            return
+        self._aviso_mostrado = mostrar
+        self._resize()
+
+    def _abrir_atualizacao(self) -> None:
+        """Janelinha com o comando de atualizacao e um botao para copiar.
+
+        O widget roda do diretorio do repositorio, entao atualizar e um `git
+        pull` mais o instalador. Copiar e colar no PowerShell evita digitar
+        o caminho errado.
+        """
+        if getattr(self, "_popup_atualizacao", None) is not None:
+            try:
+                self._popup_atualizacao.destroy()
+            except tk.TclError:
+                pass
+
+        comando = comando_de_atualizacao()
+
+        popup = tk.Toplevel(self)
+        self._popup_atualizacao = popup
+        popup.overrideredirect(True)
+        popup.attributes("-topmost", True)
+        # Borda na cor de destaque: a janelinha e um aviso, nao mais um painel.
+        popup.configure(bg=P["accent"])
+
+        corpo = tk.Frame(popup, bg=P["bg"])
+        corpo.pack(fill="both", expand=True, padx=1, pady=1)
+
+        topo = tk.Frame(corpo, bg=P["bg"])
+        topo.pack(fill="x", padx=PAD, pady=(10, 0))
+        tk.Label(
+            topo, text="NOVA VERSÃO", bg=P["bg"], fg=P["fg_dim"],
+            font=("Segoe UI", 8, "bold"),
+        ).pack(side="left")
+        tk.Label(
+            topo, text=f"{__version__} → {self._nova_versao}", bg=P["bg"],
+            fg=P["accent"], font=("Segoe UI", 11, "bold"),
+        ).pack(side="right")
+
+        largura = WIDTH - PAD * 2
+        tk.Label(
+            corpo, text="No PowerShell, dentro da pasta do widget:", bg=P["bg"],
+            fg=P["fg_faint"], font=("Segoe UI", 8), anchor="w", justify="left",
+            wraplength=largura,
+        ).pack(fill="x", padx=PAD, pady=(8, 4))
+
+        tk.Label(
+            corpo, text=comando, bg=P["bg_soft"], fg=P["fg"],
+            font=("Consolas", 8), anchor="w", justify="left",
+            wraplength=largura - 12, padx=6, pady=6,
+        ).pack(fill="x", padx=PAD)
+
+        copiar = tk.Label(
+            corpo, text="Copiar comando", bg=P["bg_soft"], fg=P["accent"],
+            font=("Segoe UI", 8, "bold"), cursor="hand2", padx=8, pady=4,
+        )
+        copiar.pack(anchor="e", padx=PAD, pady=(6, 0))
+
+        def copiar_comando(_evento=None) -> None:
+            self.clipboard_clear()
+            self.clipboard_append(comando)
+            copiar.configure(text="Copiado ✓", fg=P["ok"])
+
+        copiar.bind("<Button-1>", copiar_comando)
+
+        tk.Label(
+            corpo, text="Esc ou clique fora para fechar", bg=P["bg"],
+            fg=P["fg_faint"], font=("Segoe UI", 7),
+        ).pack(pady=(8, 9))
+
+        def fechar(_evento=None) -> None:
+            self._popup_atualizacao = None
+            popup.destroy()
+
+        popup.bind("<Escape>", fechar)
+        popup.bind("<FocusOut>", fechar)
+        popup.update_idletasks()
+        popup.geometry(f"+{self.winfo_x()}+{self.winfo_y() + self.winfo_height() + 6}")
+        popup.focus_force()
+
+    # -------------------------------------------------------------- consulta
 
     def _kick_usage_cli(self) -> None:
         """Busca os percentuais rodando `claude -p /usage` numa thread.
@@ -1186,6 +1444,7 @@ class UsageWidget(tk.Tk):
     def _render(self) -> None:
         self._render_session()
         self._render_week()
+        self._render_aviso_versao()
         if self.mode == "mini":
             self.ring.set(self._session_pct, self._session_reset)
         else:
