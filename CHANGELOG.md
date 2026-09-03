@@ -3,6 +3,29 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/);
 versionamento em [SemVer](https://semver.org/lang/pt-BR/).
 
+## [0.3.0] — 2026-09-02
+
+### Adicionado
+
+- Animação de entrada e de saída: ao abrir, o mascote cumprimenta no meio da
+  janela e sobe para o cabeçalho enquanto o painel é revelado de baixo para
+  cima; ao fechar, faz o caminho inverso, se despede e sai de cena.
+- Dezesseis gracinhas no modo minimizado, sorteadas a cada 25–70 segundos:
+  piscar, acenar, pisar no lugar, olhar para os lados, espiar, piscadela,
+  espreguiçar, pular, dançar, se sacudir, cochilar, ficar com sono, se
+  surpreender, sorrir (`> <`), pôr óculos e pôr óculos escuros.
+- Dez aparências para o mascote em **⚙ › Mascote**: clássico, monstro, robô,
+  alienígena, ninja, esqueleto, mago, pirata, raposa e cavaleiro. Cada uma
+  define cores próprias, detalhes no corpo e acessórios desenhados acima dele.
+- Interruptor **Animações** no menu: desligado, o widget abre e fecha na hora e
+  o mascote para de se mexer. A preferência persiste.
+
+### Alterado
+
+- A arte do mascote foi revista a partir das referências oficiais: olhos
+  verticais de três blocos e quatro perninhas separadas, no lugar dos olhos
+  achatados e pés finos extraídos do terminal.
+
 ## [0.2.1] — 2026-09-02
 
 ### Corrigido

@@ -8,7 +8,7 @@
 
 <img src="docs/painel-escuro.png" width="270" alt="Painel do widget">
 
-![Versão](https://img.shields.io/badge/vers%C3%A3o-0.2.1-d97757)
+![Versão](https://img.shields.io/badge/vers%C3%A3o-0.3.0-d97757)
 ![Licença](https://img.shields.io/badge/licen%C3%A7a-MIT-4d7a3a)
 ![Python](https://img.shields.io/badge/python-3.10%2B-d97757)
 ![Plataforma](https://img.shields.io/badge/plataforma-Windows-6d6659)
@@ -59,7 +59,7 @@ Para atualizar, basta `git pull` e rodar o instalador de novo — ele reinicia o
 | Ação | Resultado |
 |---|---|
 | `↻` | Consulta o `/usage` agora |
-| `⚙` ou botão direito | Menu: modo, tema, intervalo, opacidade |
+| `⚙` ou botão direito | Menu: modo, tema, mascote, intervalo, opacidade, animações |
 | `─` | Minimiza para o círculo |
 | `✕` ou `Esc` | Fecha |
 | Arrastar cabeçalho ou círculo | Move |
@@ -82,6 +82,27 @@ Claro e escuro, seguindo o Windows por padrão. Fixe um dos dois no menu.
 <div align="center">
 <img src="docs/painel-claro.png" width="270" alt="Tema claro">
 </div>
+
+## Mascote
+
+Dez aparências em **⚙ › Mascote**. Cada uma tem cores próprias, detalhes no
+corpo e acessórios — chapéu, antenas, orelhas — desenhados acima dele.
+
+<div align="center">
+<img src="docs/skins.png" width="640" alt="As dez aparências do mascote">
+</div>
+
+## Animações
+
+Ao abrir, o mascote cumprimenta e sobe para o cabeçalho enquanto o painel
+aparece; ao fechar, desce, se despede e sai de cena. No modo minimizado ele faz
+uma de dezesseis gracinhas a cada 25–70 segundos.
+
+<div align="center">
+<img src="docs/gracinhas.png" width="420" alt="As gracinhas do mascote">
+</div>
+
+Tudo isso se desliga em **⚙ › Animações** — aí o widget abre e fecha na hora.
 
 ## Terminal
 

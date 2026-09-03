@@ -16,6 +16,7 @@ conta propria: sem dado, ele diz que nao tem dado.
 
 from __future__ import annotations
 
+import random
 import threading
 import time
 import tkinter as tk
@@ -27,6 +28,7 @@ from .single_instance import serve
 from .state import read_state
 from .theme import (
     CHROMA,
+    SKINS,
     MASCOT_H,
     MASCOT_W,
     P,
@@ -35,7 +37,9 @@ from .theme import (
     render_bar_loading,
     render_dot,
     render_mascot,
+    render_pose,
     render_ring,
+    set_skin,
     set_theme,
 )
 
@@ -53,6 +57,47 @@ SPIN_MS = 70
 # O controle continua indo de 1 a 100 para o usuario; e essa faixa que ele
 # percorre de verdade.
 OPACIDADE_MINIMA = 0.40
+
+# Entrada e despedida. O mascote sobe do meio da janela ate o cabecalho ao
+# abrir, e faz o caminho inverso ao fechar: desce, acena e vai embora.
+ANIM_MS = 40          # cadencia da despedida
+# A entrada corre mais devagar que a saida: e o primeiro contato, e a 40ms o
+# cumprimento passava antes de ser percebido.
+ENTRADA_MS = 58
+ENTRADA_OI = 10       # quadros parado, acenando um oi (cinco acenos)
+ENTRADA_SUBIDA = 14   # quadros ate assentar no cabecalho
+SAIDA_DESCENDO = 10
+SAIDA_ACENOS = 8      # quadros parado, acenando
+SAIDA_ANDANDO = 12    # quadros ate sair de cena
+SAIDA_PASSO = 12      # pixels que ele avanca por quadro
+PALCO_ESCALA = 4      # ampliacao do mascote no meio da janela
+SAUDACAO = "olá"
+DESPEDIDA = "até logo"
+
+# Gracinhas do modo minimizado: quantos quadros e o intervalo entre eles. As
+# poses em si moram em theme.POSES; aqui fica so a cadencia de cada uma.
+GRACINHAS = {
+    "piscar": (4, 140),
+    "oi": (8, 110),
+    "passos": (8, 95),
+    "olhar": (8, 190),
+    "oculos": (8, 210),
+    "sono": (6, 260),
+    "surpresa": (6, 150),
+    "piscadela": (4, 170),
+    "bracos": (4, 210),
+    "pular": (8, 85),
+    "dancar": (8, 130),
+    "sacudir": (8, 60),
+    "cochilar": (10, 200),
+    "espiar": (6, 160),
+    "feliz": (6, 200),
+    "oculos_sol": (8, 190),
+}
+# Intervalo entre uma gracinha e a proxima, sorteado nesta faixa. Curto demais
+# vira tique nervoso; longo demais e como se nao existisse.
+GRACINHA_MIN_S = 25
+GRACINHA_MAX_S = 70
 DAYS = ("seg", "ter", "qua", "qui", "sex", "sáb", "dom")
 
 
@@ -155,6 +200,30 @@ class Ring(tk.Canvas):
         # fica so nos pes, e de longe nem se nota.
         salto = -1 if frame % 2 else 0
         self.coords(self._mascot_id, self.size / 2, self._mascot_y + salto)
+
+    def gracejar(self, tipo: str, quadro: int) -> None:
+        """Um quadro de uma pose ociosa (piscar, olhar de lado, pular...)."""
+        self._mascot, dx, dy = render_pose(tipo, quadro, scale=2, bg=P["bg"])
+        self.itemconfigure(self._mascot_id, image=self._mascot)
+        self.coords(
+            self._mascot_id, self.size / 2 + dx, self._mascot_y + dy
+        )
+
+    def comecar_despedida(self) -> None:
+        """Tira o percentual e a hora: fica so o mascote no disco."""
+        self.itemconfigure(self._value, text="")
+        self.itemconfigure(self._reset, text="")
+        self.coords(self._mascot_id, self.size / 2, self.size / 2)
+        self._mascot_y = self.size / 2
+
+    def despedir(self, passo: int, avanco: int, acenando: bool) -> None:
+        """Acena parado e depois sai andando pela direita."""
+        self._mascot = render_mascot(2, bg=P["bg"], frame=passo, wave=acenando)
+        self.itemconfigure(self._mascot_id, image=self._mascot)
+        salto = 0 if acenando else (-1 if passo % 2 else 0)
+        self.coords(
+            self._mascot_id, self.size / 2 + avanco, self._mascot_y + salto
+        )
 
     def set(self, pct: float | None, reset_text: str = "") -> None:
         color = P["ok"] if pct is None else level_color(pct)
@@ -303,9 +372,19 @@ class UsageWidget(tk.Tk):
         self._instancia = instancia
         self._pedido_foco = False
         self._popup_opacidade = None
+        self._saindo = False
+        self.palco = None
+        self.viajante = None
+        self._saindo = False
+        self.palco = None
+        self.viajante = None
         self._popup_opacidade = None
+        self._saindo = False
+        self.palco = None
+        self.viajante = None
         self.cfg = Config.load()
         self.theme = set_theme(self.cfg.theme)
+        self.skin = set_skin(self.cfg.skin)
         self.tz = local_timezone()
         self.live = read_state()
         self.mode = self.cfg.mode if self.cfg.mode in MODES else "panel"
@@ -322,9 +401,13 @@ class UsageWidget(tk.Tk):
         self._apply_mode(self.mode, save=False)
         if instancia is not None:
             serve(instancia, self._marcar_pedido_foco)
+        if self.mode != "mini":
+            # Depois do primeiro desenho: o palco precisa das medidas reais.
+            self.after(60, self._comecar_entrada)
         self.after(200, self._tick)
         self.after(250, self._atender_pedido_foco)
         self.after(600, self._schedule_usage)
+        self._agendar_gracinha()
 
     # ------------------------------------------------------------- estrutura
 
@@ -365,6 +448,7 @@ class UsageWidget(tk.Tk):
         # Borda de 1px: frame externo colorido com o conteudo por dentro.
         self.panel = tk.Frame(self.container, bg=P["border"])
         root = tk.Frame(self.panel, bg=P["bg"])
+        self.panel_root = root
         root.pack(fill="both", expand=True, padx=1, pady=1)
         # Espacador de altura zero: fixa a largura do painel sem impedir que o
         # frame calcule a propria altura a partir dos filhos.
@@ -402,6 +486,7 @@ class UsageWidget(tk.Tk):
 
         body = tk.Frame(root, bg=P["bg"])
         body.pack(fill="both", expand=True, padx=PAD, pady=(12, 4))
+        self.body = body
 
         self.session_meter = Meter(body, "SESSÃO ATUAL")
         self.session_meter.pack(fill="x")
@@ -452,6 +537,8 @@ class UsageWidget(tk.Tk):
         self.var_mode = tk.StringVar(value=self.mode)
         self.var_theme = tk.StringVar(value=self.cfg.theme)
         self.var_top = tk.BooleanVar(value=self.cfg.always_on_top)
+        self.var_anim = tk.BooleanVar(value=self.cfg.animations)
+        self.var_skin = tk.StringVar(value=self.skin)
         self.var_interval = tk.IntVar(value=self.cfg.usage_refresh_minutes)
 
         for label, value in (("Minimizado", "mini"), ("Painel", "panel")):
@@ -475,6 +562,17 @@ class UsageWidget(tk.Tk):
             )
         self.menu.add_cascade(label="Tema", menu=theme_menu)
 
+        skin_menu = tk.Menu(
+            self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
+            activebackground=P["accent"], activeforeground=P["menu_fg"],
+        )
+        for chave, dados in SKINS.items():
+            skin_menu.add_radiobutton(
+                label=dados["nome"], value=chave, variable=self.var_skin,
+                command=lambda v=chave: self._apply_skin(v),
+            )
+        self.menu.add_cascade(label="Mascote", menu=skin_menu)
+
         interval_menu = tk.Menu(
             self.menu, tearoff=0, bg=P["bg_soft"], fg=P["fg"],
             activebackground=P["accent"], activeforeground=P["menu_fg"],
@@ -495,6 +593,9 @@ class UsageWidget(tk.Tk):
 
         self.menu.add_checkbutton(
             label="Sempre visível", variable=self.var_top, command=self._toggle_top
+        )
+        self.menu.add_checkbutton(
+            label="Animações", variable=self.var_anim, command=self._toggle_anim
         )
         self.menu.add_command(label="Opacidade…", command=self._abrir_opacidade)
         self.menu.add_separator()
@@ -528,6 +629,22 @@ class UsageWidget(tk.Tk):
             self.cfg.save()
         self._render()
 
+    def _apply_skin(self, nome: str) -> None:
+        """Troca a aparencia do mascote, reconstruindo a interface.
+
+        As imagens ja desenhadas trazem as cores da skin anterior, entao nao
+        basta trocar a variavel: o conteudo precisa ser refeito.
+        """
+        self.cfg.skin = nome
+        self.cfg.save()
+        self.skin = set_skin(nome)
+
+        posicao = (self.winfo_x(), self.winfo_y())
+        self.container.destroy()
+        self._build()
+        self._apply_mode(self.mode, save=False)
+        self.geometry(f"+{posicao[0]}+{posicao[1]}")
+
     def _apply_theme(self, name: str) -> None:
         """Troca a paleta reconstruindo a interface.
 
@@ -554,6 +671,164 @@ class UsageWidget(tk.Tk):
         self.update_idletasks()
         self.geometry("")
         self.update_idletasks()
+
+    # ------------------------------------------------------------ animacoes
+
+    def _montar_palco(self) -> bool:
+        """Cria um canvas sobre a janela inteira, com o mascote em cena.
+
+        Cobrir tudo -- e nao so o corpo -- e o que permite ao mascote transitar
+        entre o meio da janela e o lugar dele no cabecalho.
+        """
+        try:
+            self.update_idletasks()
+            self.palco = tk.Canvas(
+                self.panel_root, bg=P["bg"], highlightthickness=0, bd=0
+            )
+            self.palco.place(x=0, y=0, relwidth=1, relheight=1)
+
+            largura = self.panel_root.winfo_width()
+            altura = self.panel_root.winfo_height()
+            # Destino: o proprio lugar do mascote no cabecalho.
+            self._alvo = (
+                self.dot.winfo_x() + MASCOT_W / 2,
+                self.dot.winfo_y() + MASCOT_H / 2,
+            )
+            self._centro = (largura / 2, altura / 2 - 4)
+            self._palco_imagem = render_mascot(PALCO_ESCALA, bg=P["bg"])
+            self._palco_id = self.palco.create_image(
+                *self._centro, image=self._palco_imagem, anchor="center"
+            )
+            self._palco_texto = self.palco.create_text(
+                largura / 2, self._centro[1] + MASCOT_H * PALCO_ESCALA / 2 + 16,
+                text="", fill=P["fg_faint"], font=("Segoe UI", 9),
+            )
+            return True
+        except tk.TclError:
+            return False
+
+    def _desenhar_no_palco(self, x, y, escala, frame=0, wave=False) -> None:
+        self._palco_imagem = render_mascot(
+            max(int(escala), 1), bg=P["bg"], frame=frame, wave=wave
+        )
+        self.palco.itemconfigure(self._palco_id, image=self._palco_imagem)
+        self.palco.coords(self._palco_id, x, y)
+
+    def _comecar_entrada(self) -> None:
+        if not self.cfg.animations:
+            return
+        if self._montar_palco():
+            self._animar_entrada()
+
+    # ------------------------------------------------------ gracinhas ocioso
+
+    def _agendar_gracinha(self) -> None:
+        """Marca a proxima gracinha para daqui a um tempo sorteado.
+
+        Reagenda mesmo com as animacoes desligadas: assim, se forem religadas,
+        o mascote volta a se mexer sem precisar reabrir o widget.
+        """
+        espera = random.randint(GRACINHA_MIN_S, GRACINHA_MAX_S) * 1000
+        self.after(espera, self._fazer_gracinha)
+
+    def _fazer_gracinha(self) -> None:
+        ocupado = self._cli_busy or self._saindo or self.mode != "mini"
+        if ocupado or not self.cfg.animations:
+            self._agendar_gracinha()
+            return
+        self._tocar_gracinha(random.choice(list(GRACINHAS)), 0)
+
+    def _tocar_gracinha(self, tipo: str, quadro: int) -> None:
+        quadros, intervalo = GRACINHAS[tipo]
+        if quadro >= quadros or self._cli_busy or self._saindo:
+            try:
+                self.ring.set(self._session_pct, self._session_reset)
+            except tk.TclError:
+                return
+            self._agendar_gracinha()
+            return
+
+        try:
+            self.ring.gracejar(tipo, quadro)
+        except tk.TclError:
+            return
+        self.after(intervalo, lambda: self._tocar_gracinha(tipo, quadro + 1))
+
+    def _animar_entrada(self, quadro: int = 0) -> None:
+        """Um oi no meio da janela, depois a subida ate o cabecalho.
+
+        Na subida o mascote deixa o palco e vira um widget solto sobre o
+        painel, enquanto o palco encolhe de baixo para cima -- e assim o
+        conteudo vai aparecendo junto com ele, em vez de surgir de uma vez.
+        """
+        total = ENTRADA_OI + ENTRADA_SUBIDA
+        if quadro >= total:
+            self._encerrar_entrada()
+            return
+
+        try:
+            if quadro < ENTRADA_OI:
+                if quadro == 0:
+                    self.palco.itemconfigure(self._palco_texto, text=SAUDACAO)
+                # O braco troca a cada dois quadros, como na despedida.
+                self._desenhar_no_palco(
+                    *self._centro, PALCO_ESCALA, frame=quadro // 2, wave=True
+                )
+            else:
+                self._subir(quadro - ENTRADA_OI)
+        except (tk.TclError, AttributeError):
+            self._encerrar_entrada()
+            return
+
+        self.after(ENTRADA_MS, lambda: self._animar_entrada(quadro + 1))
+
+    def _subir(self, passo: int) -> None:
+        avanco = (passo + 1) / ENTRADA_SUBIDA
+        suave = 1 - (1 - avanco) ** 3   # desacelera na chegada
+
+        if self.viajante is None:
+            # A saudacao sai de cena junto com o inicio da subida.
+            self.palco.itemconfigure(self._palco_texto, text="")
+            self._soltar_viajante()
+
+        x = self._centro[0] + (self._alvo[0] - self._centro[0]) * suave
+        y = self._centro[1] + (self._alvo[1] - self._centro[1]) * suave
+        escala = max(round(PALCO_ESCALA - (PALCO_ESCALA - 1) * suave), 1)
+
+        imagem = render_mascot(escala, bg=P["bg"], frame=passo)
+        self.viajante.configure(
+            image=imagem, width=MASCOT_W * escala, height=MASCOT_H * escala
+        )
+        self.viajante.image = imagem      # a referencia precisa sobreviver
+        self.viajante.place(x=x, y=y, anchor="center")
+
+        # O palco recua de baixo para cima, revelando o painel aos poucos.
+        # `relheight` precisa ser zerado junto: enquanto valer 1, ele manda na
+        # altura e o `height` abaixo nao surte efeito nenhum.
+        altura = self.panel_root.winfo_height()
+        self.palco.place_configure(
+            relheight=0, height=max(int(altura * (1 - suave)), 1)
+        )
+
+    def _soltar_viajante(self) -> None:
+        """Tira o mascote do palco e o poe solto sobre o painel.
+
+        Preso ao palco ele seria cortado quando o palco encolhesse.
+        """
+        self.palco.itemconfigure(self._palco_id, state="hidden")
+        self.viajante = tk.Label(self.panel_root, bg=P["bg"], bd=0)
+        self.viajante.place(x=self._centro[0], y=self._centro[1], anchor="center")
+        self.viajante.lift()
+
+    def _encerrar_entrada(self) -> None:
+        for widget in ("palco", "viajante"):
+            alvo = getattr(self, widget, None)
+            if alvo is not None:
+                try:
+                    alvo.destroy()
+                except tk.TclError:
+                    pass
+                setattr(self, widget, None)
 
     # -------------------------------------------------------- copia unica
 
@@ -646,6 +921,10 @@ class UsageWidget(tk.Tk):
         self._next_usage_at = time.time() + minutes * 60 if minutes else None
         self._render_footer()
 
+    def _toggle_anim(self) -> None:
+        self.cfg.animations = self.var_anim.get()
+        self.cfg.save()
+
     def _toggle_top(self) -> None:
         self.cfg.always_on_top = self.var_top.get()
         self.attributes("-topmost", self.cfg.always_on_top)
@@ -717,15 +996,104 @@ class UsageWidget(tk.Tk):
         popup.focus_force()
 
     def quit_widget(self, _event=None) -> None:
+        """Guarda o estado e manda o mascote embora antes de fechar."""
         self.cfg.pos_x = self.winfo_x()
         self.cfg.pos_y = self.winfo_y()
         self.cfg.save()
+        if self._saindo:
+            return
+        self._saindo = True
+        if not self.cfg.animations:
+            self._fechar_de_vez()
+            return
+        self._preparar_saida()
+        self._animar_saida()
+
+    def _preparar_saida(self) -> None:
+        """Poe o mascote em cena, no lugar de onde ele vai descer."""
+        if self.mode == "mini":
+            self.ring.comecar_despedida()
+            return
+        if not self._montar_palco():
+            self._saindo = False
+            return
+        # Comeca no cabecalho: a despedida e o caminho inverso da entrada.
+        self._desenhar_no_palco(*self._alvo, 1)
+
+    def _animar_saida(self, quadro: int = 0) -> None:
+        """Desce ate o meio, acena e sai de cena com a janela se apagando."""
+        total = SAIDA_DESCENDO + SAIDA_ACENOS + SAIDA_ANDANDO
+        if quadro >= total:
+            self._fechar_de_vez()
+            return
+
+        try:
+            if self.mode == "mini":
+                self._saida_mini(quadro)
+            else:
+                self._saida_painel(quadro)
+        except (tk.TclError, AttributeError):
+            self._fechar_de_vez()
+            return
+
+        andados = quadro - SAIDA_DESCENDO - SAIDA_ACENOS
+        if andados >= 0:
+            self.attributes(
+                "-alpha",
+                max(self.cfg.opacity * (1 - (andados + 1) / SAIDA_ANDANDO), 0.0),
+            )
+
+        self.after(ANIM_MS, lambda: self._animar_saida(quadro + 1))
+
+    def _saida_painel(self, quadro: int) -> None:
+        if quadro < SAIDA_DESCENDO:            # descendo do cabecalho
+            avanco = (quadro + 1) / SAIDA_DESCENDO
+            suave = 1 - (1 - avanco) ** 3
+            x = self._alvo[0] + (self._centro[0] - self._alvo[0]) * suave
+            y = self._alvo[1] + (self._centro[1] - self._alvo[1]) * suave
+            escala = round(1 + (PALCO_ESCALA - 1) * suave)
+            self._desenhar_no_palco(x, y, escala, frame=quadro)
+            if quadro == SAIDA_DESCENDO - 1:
+                self.palco.itemconfigure(self._palco_texto, text=DESPEDIDA)
+            return
+
+        etapa = quadro - SAIDA_DESCENDO
+        if etapa < SAIDA_ACENOS:               # acenando parado
+            # O braco troca a cada dois quadros; mais rapido pareceria tremor.
+            self._desenhar_no_palco(
+                *self._centro, PALCO_ESCALA, frame=etapa // 2, wave=True
+            )
+            return
+
+        passo = etapa - SAIDA_ACENOS           # indo embora
+        salto = -2 if passo % 2 else 0
+        self._desenhar_no_palco(
+            self._centro[0] + SAIDA_PASSO * (passo + 1),
+            self._centro[1] + salto,
+            PALCO_ESCALA,
+            frame=passo,
+        )
+
+    def _saida_mini(self, quadro: int) -> None:
+        if quadro < SAIDA_DESCENDO:
+            return                              # no circulo ele ja esta no meio
+        etapa = quadro - SAIDA_DESCENDO
+        if etapa < SAIDA_ACENOS:
+            self.ring.despedir(etapa // 2, 0, True)
+            return
+        passo = etapa - SAIDA_ACENOS
+        self.ring.despedir(passo, SAIDA_PASSO * (passo + 1), False)
+
+    def _fechar_de_vez(self) -> None:
         if self._instancia is not None:
             try:
                 self._instancia.close()
             except OSError:
                 pass
-        self.destroy()
+        try:
+            self.destroy()
+        except tk.TclError:
+            pass
 
     # ------------------------------------------------------------ atualizacao
 

@@ -38,6 +38,11 @@ class Config:
     mode: str = "panel"
     # theme: "dark", "light" ou "auto" (segue a preferencia do Windows).
     theme: str = "auto"
+    # Com as animacoes desligadas o widget abre e fecha na hora, e o mascote
+    # para de fazer gracinhas no modo minimizado.
+    animations: bool = True
+    # Aparencia do mascote: veja theme.SKINS.
+    skin: str = "classico"
     pos_x: int = 40
     pos_y: int = 40
     opacity: float = 0.96

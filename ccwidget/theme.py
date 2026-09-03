@@ -107,16 +107,16 @@ def level_color(pct: float) -> str:
 MASCOT = (
     "..###############..",
     "..###############..",
-    "..###############..",
+    "..##..#######..##..",
+    "..##..#######..##..",
     "..##..#######..##..",
     "..###############..",
     "###################",
     "###################",
     "..###############..",
     "..###############..",
-    "....####...####....",
-    ".......#...#.......",
-    ".......#...#.......",
+    "..##..##...##..##..",
+    "..##..##...##..##..",
 )
 
 MASCOT_W = len(MASCOT[0])
@@ -126,6 +126,45 @@ MASCOT_H = len(MASCOT)
 # recolher uma de cada vez da a impressao de passo. Os quadros pares deixam as
 # duas no chao, para o movimento ter um ponto de apoio entre as passadas.
 MASCOT_STEPS = 4
+
+
+# Linhas onde ficam os bracos (as pontas que passam do corpo) e para onde o
+# braco direito sobe no aceno.
+BRACO_LINHAS = (6, 7)
+BRACO_ERGUIDO = (4, 5)
+BRACO_COLUNAS = (17, 18)
+
+
+# Os olhos sao dois vaos verticais no corpo; preenche-los fecha as palpebras.
+OLHO_LINHA = 2
+OLHO_LINHAS = (2, 3, 4)
+OLHO_COLUNAS = (4, 5, 13, 14)
+
+
+def mascot_blink() -> tuple[str, ...]:
+    """Mascote de olhos fechados."""
+    linhas = [list(l) for l in MASCOT]
+    for y in OLHO_LINHAS:
+        for x in OLHO_COLUNAS:
+            linhas[y][x] = "#"
+    return tuple("".join(l) for l in linhas)
+
+
+def mascot_wave(frame: int) -> tuple[str, ...]:
+    """Mascote acenando: o braco direito sobe e desce.
+
+    O aceno reaproveita as pontas que ja passam do corpo -- e o unico traco do
+    desenho que pode se mover sem descaracterizar a figura.
+    """
+    linhas = [list(l) for l in MASCOT]
+    if frame % 2:
+        for y in BRACO_LINHAS:
+            for x in BRACO_COLUNAS:
+                linhas[y][x] = "."
+        for y in BRACO_ERGUIDO:
+            for x in BRACO_COLUNAS:
+                linhas[y][x] = "#"
+    return tuple("".join(l) for l in linhas)
 
 
 def mascot_frame(frame: int) -> tuple[str, ...]:
@@ -149,34 +188,254 @@ def mascot_frame(frame: int) -> tuple[str, ...]:
 _MASCOT_CACHE: dict[tuple, tk.PhotoImage] = {}
 
 
+# ------------------------------------------------------------------ skins
+
+# Uma skin muda a cor do mascote, pode pintar detalhes dentro do corpo e pode
+# acrescentar um "topo" -- chapeu, antenas, orelhas -- desenhado acima dele.
+#
+# O corpo continua sendo o MASCOT de 19x12, e e nele que as poses mexem. O topo
+# entra so na hora de desenhar, entao acessorio nenhum atrapalha as animacoes.
+#
+# Na arte, cada caractere e uma cor: "#" e a cor principal e as letras sao
+# cores extras declaradas pela skin. "." e vazio.
+
+SKINS: dict[str, dict] = {
+    "classico": {
+        "nome": "Clássico",
+        "cores": {"#": "#d97757"},
+    },
+    "monstro": {
+        "nome": "Monstro",
+        "cores": {"#": "#7a9e4f", "a": "#5d7a3c"},
+        "detalhe": "espinhos",
+    },
+    "robo": {
+        "nome": "Robô",
+        "cores": {"#": "#5b86b5", "a": "#8fc2e8", "b": "#d97757"},
+        "topo": ("........#..........", "......aaaaa........"),
+        "detalhe": "visor",
+    },
+    "alien": {
+        "nome": "Alienígena",
+        "cores": {"#": "#8b6bb1", "a": "#c9a6e8"},
+        "topo": ("....a.......a......", ".....a.....a......."),
+    },
+    "ninja": {
+        "nome": "Ninja",
+        "cores": {"#": "#33343d", "a": "#c0392b", "b": "#e8c9a0"},
+        "detalhe": "faixa",
+    },
+    "esqueleto": {
+        "nome": "Esqueleto",
+        "cores": {"#": "#e6e2d3", "a": "#b8b1a0"},
+        "detalhe": "costelas",
+    },
+    "mago": {
+        "nome": "Mago",
+        "cores": {"#": "#7b5ea7", "a": "#5a4180", "b": "#f2c14e"},
+        "topo": (".......aaa.........", "......aaaaa........"),
+        "detalhe": "estrela",
+    },
+    "pirata": {
+        "nome": "Pirata",
+        "cores": {"#": "#d97757", "a": "#2f3136", "b": "#e6e2d3"},
+        "topo": ("....aaaaaaaaa......", "...aaaaaaaaaaa....."),
+        "detalhe": "tapa_olho",
+    },
+    "raposa": {
+        "nome": "Raposa",
+        "cores": {"#": "#e07b39", "a": "#f5ead6", "b": "#3a2b22"},
+        "topo": ("..##.........##....", "..##.........##...."),
+        "detalhe": "focinho",
+    },
+    "cavaleiro": {
+        "nome": "Cavaleiro",
+        "cores": {"#": "#9aa2ab", "a": "#6c737c", "b": "#c0392b"},
+        "topo": (".......bbb.........", "....aaaaaaaaa......"),
+        "detalhe": "viseira",
+    },
+}
+
+SKIN_PADRAO = "classico"
+
+
+def _detalhe_espinhos(linhas) -> None:
+    """Serrilha as bordas laterais, como as pontas do monstro."""
+    for y in (1, 3, 5, 8):
+        linhas[y][2] = "a"
+        linhas[y][16] = "a"
+
+
+def _detalhe_visor(linhas) -> None:
+    """Faixa clara ligando os olhos, como o visor de um robo."""
+    meio = OLHO_LINHAS[1]
+    for x in range(6, 13):
+        linhas[meio][x] = "a"
+
+
+def _detalhe_faixa(linhas) -> None:
+    """Faixa do ninja passando por tras dos olhos."""
+    meio = OLHO_LINHAS[1]
+    for x in range(2, 17):
+        if linhas[meio][x] == "#":
+            linhas[meio][x] = "a"
+
+
+def _detalhe_costelas(linhas) -> None:
+    """Riscos no tronco, para lembrar uma caixa toracica."""
+    for y in (8, 9):
+        for x in (6, 9, 12):
+            linhas[y][x] = "a"
+
+
+def _detalhe_estrela(linhas) -> None:
+    """Um ponto dourado no peito do mago."""
+    linhas[8][9] = "b"
+
+
+def _detalhe_tapa_olho(linhas) -> None:
+    """Cobre o olho esquerdo e deixa a correia atravessada."""
+    for y in OLHO_LINHAS:
+        for x in OLHOS_PADRAO[0]:
+            linhas[y][x] = "a"
+    linhas[OLHO_LINHAS[0]][3] = "a"
+    linhas[OLHO_LINHAS[0]][6] = "a"
+
+
+def _detalhe_focinho(linhas) -> None:
+    """Focinho claro na parte de baixo do rosto."""
+    for x in range(7, 12):
+        linhas[5][x] = "a"
+    linhas[5][9] = "b"
+
+
+def _detalhe_viseira(linhas) -> None:
+    """Fendas verticais da viseira do elmo."""
+    meio = OLHO_LINHAS[1]
+    for x in range(6, 13):
+        linhas[meio][x] = "a"
+    for x in (7, 9, 11):
+        for y in OLHO_LINHAS:
+            linhas[y][x] = "a"
+
+
+DETALHES = {
+    "espinhos": _detalhe_espinhos,
+    "visor": _detalhe_visor,
+    "faixa": _detalhe_faixa,
+    "costelas": _detalhe_costelas,
+    "estrela": _detalhe_estrela,
+    "tapa_olho": _detalhe_tapa_olho,
+    "focinho": _detalhe_focinho,
+    "viseira": _detalhe_viseira,
+}
+
+_SKIN_ATUAL = SKIN_PADRAO
+
+
+def set_skin(nome: str) -> str:
+    """Escolhe a skin ativa. Devolve a que ficou valendo."""
+    global _SKIN_ATUAL
+    _SKIN_ATUAL = nome if nome in SKINS else SKIN_PADRAO
+    _MASCOT_CACHE.clear()      # as imagens guardam as cores da skin
+    return _SKIN_ATUAL
+
+
+def get_skin() -> str:
+    return _SKIN_ATUAL
+
+
+def compor_skin(arte: tuple[str, ...], skin: str | None = None):
+    """Junta corpo, detalhes e topo da skin.
+
+    Devolve as linhas e quantas delas sao de acessorio, porque o desenho
+    precisa subir para o topo caber sem empurrar o corpo para baixo.
+    """
+    dados = SKINS.get(skin or _SKIN_ATUAL, SKINS[SKIN_PADRAO])
+
+    linhas = [list(l) for l in arte]
+    detalhe = dados.get("detalhe")
+    if detalhe:
+        DETALHES[detalhe](linhas)
+
+    topo = [list(l) for l in dados.get("topo", ())]
+    return tuple("".join(l) for l in topo + linhas), len(topo)
+
+
+def cores_da_skin(skin: str | None = None) -> dict:
+    dados = SKINS.get(skin or _SKIN_ATUAL, SKINS[SKIN_PADRAO])
+    return dados["cores"]
+
+
+def pintar(arte: tuple[str, ...], scale: int, bg: str, skin: str | None = None):
+    """Rasteriza uma arte ja composta, usando as cores da skin."""
+    cores = cores_da_skin(skin)
+    principal = cores.get("#", P["accent"])
+    largura = max(len(l) for l in arte)
+
+    rows = []
+    for linha in arte:
+        pixels = []
+        for x in range(largura):
+            ch = linha[x] if x < len(linha) else "."
+            pixels.append(bg if ch == "." else cores.get(ch, principal))
+        row = "{" + " ".join(p for p in pixels for _ in range(scale)) + "}"
+        rows.extend([row] * scale)
+
+    imagem = tk.PhotoImage(width=largura * scale, height=len(arte) * scale)
+    imagem.put(" ".join(rows))
+    return imagem
+
+
 def render_mascot(
     scale: int = 1,
     color: str | None = None,
     bg: str | None = None,
     frame: int = 0,
-) -> tk.PhotoImage:
-    """Devolve o mascote como imagem, ampliado por um fator inteiro.
+    wave: bool = False,
+    blink: bool = False,
+):
+    """Mascote na skin ativa, ampliado por um fator inteiro.
 
-    O resultado fica em cache por (escala, cor, fundo, quadro): montar a imagem
-    custa mais do que exibi-la, e a animacao repete os mesmos quadros.
+    Devolve so a imagem, para quem nao se importa com o acessorio; use
+    `render_mascot_off` quando precisar do deslocamento que o topo exige.
     """
-    color = color or P["accent"]
+    imagem, _ = render_mascot_off(scale, color, bg, frame, wave, blink)
+    return imagem
+
+
+def render_mascot_off(
+    scale: int = 1,
+    color: str | None = None,
+    bg: str | None = None,
+    frame: int = 0,
+    wave: bool = False,
+    blink: bool = False,
+):
+    """Como `render_mascot`, mas tambem diz quanto subir a imagem.
+
+    Uma skin com chapeu ou antenas rende uma imagem mais alta. Centrada como
+    esta, ela empurraria o corpo para baixo; o deslocamento devolvido aqui
+    recoloca o corpo onde estava.
+    """
     bg = bg or P["bg_soft"]
-    key = (scale, color, bg, frame % MASCOT_STEPS)
-    cached = _MASCOT_CACHE.get(key)
-    if cached is not None:
-        return cached
+    if blink:
+        arte = mascot_blink()
+    elif wave:
+        arte = mascot_wave(frame)
+    else:
+        arte = mascot_frame(frame)
 
-    rows = []
-    for line in mascot_frame(frame):
-        pixels = [color if ch == "#" else bg for ch in line]
-        row = "{" + " ".join(p for p in pixels for _ in range(scale)) + "}"
-        rows.extend([row] * scale)
-
-    image = tk.PhotoImage(width=MASCOT_W * scale, height=MASCOT_H * scale)
-    image.put(" ".join(rows))
-    _MASCOT_CACHE[key] = image
-    return image
+    composta, linhas_topo = compor_skin(arte)
+    key = (
+        "m", scale, bg, frame % MASCOT_STEPS, wave, blink, get_skin(),
+        color or "",
+    )
+    imagem = _MASCOT_CACHE.get(key)
+    if imagem is None:
+        imagem = pintar(composta, scale, bg)
+        _MASCOT_CACHE[key] = imagem
+    return imagem, -(linhas_topo * scale) / 2
 
 
 # ------------------------------------------------- formas com antialiasing
@@ -456,3 +715,254 @@ def render_dot(size: int, color: str, bg: str, samples: int = 4) -> tk.PhotoImag
     image.put(" ".join(rows))
     _SHAPE_CACHE[key] = image
     return image
+
+
+# ------------------------------------------------------------------ poses
+
+# O mascote tem 19x12 blocos, e quase tudo nele e corpo cheio. Os unicos
+# tracos que podem mudar sem descaracterizar a figura sao os vaos (os olhos) e
+# as pontas que passam do corpo (os bracos e os pes). Todas as poses abaixo
+# trabalham sobre esses tres elementos, mais o deslocamento da figura inteira.
+
+OLHOS_PADRAO = ((4, 5), (13, 14))
+CORPO_ESQ, CORPO_DIR = 2, 16      # limites em que um vao ainda cai no corpo
+
+
+def _base() -> list[list[str]]:
+    return [list(l) for l in MASCOT]
+
+
+def _tapar_olhos(linhas: list[list[str]]) -> None:
+    for y in OLHO_LINHAS:
+        for lado in OLHOS_PADRAO:
+            for x in lado:
+                linhas[y][x] = "#"
+
+
+def _abrir_olhos(linhas, esquerdo, direito, alturas=OLHO_LINHAS) -> None:
+    """Abre vaos nas posicoes dadas, respeitando as bordas do corpo."""
+    for y in alturas:
+        if not 0 <= y < len(linhas):
+            continue
+        for x in tuple(esquerdo) + tuple(direito):
+            if CORPO_ESQ <= x <= CORPO_DIR:
+                linhas[y][x] = "."
+
+
+def _erguer_bracos(linhas, esquerdo=True, direito=True) -> None:
+    if direito:
+        for y in BRACO_LINHAS:
+            for x in BRACO_COLUNAS:
+                linhas[y][x] = "."
+        for y in BRACO_ERGUIDO:
+            for x in BRACO_COLUNAS:
+                linhas[y][x] = "#"
+    if esquerdo:
+        for y in BRACO_LINHAS:
+            for x in (0, 1):
+                linhas[y][x] = "."
+        for y in BRACO_ERGUIDO:
+            for x in (0, 1):
+                linhas[y][x] = "#"
+
+
+def _montar(linhas) -> tuple[str, ...]:
+    return tuple("".join(l) for l in linhas)
+
+
+def pose_olhar(quadro: int):
+    """Olha para um lado, volta, olha para o outro."""
+    etapa = quadro % 8
+    linhas = _base()
+    _tapar_olhos(linhas)
+    if etapa in (0, 1):            # esquerda
+        _abrir_olhos(linhas, (3, 4), (12, 13))
+    elif etapa in (4, 5):          # direita
+        _abrir_olhos(linhas, (5, 6), (14, 15))
+    else:                          # centro
+        _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_oculos(quadro: int):
+    """Poe e tira um par de oculos: vaos maiores, em duas alturas."""
+    linhas = _base()
+    if quadro % 8 < 6:             # de oculos na maior parte do tempo
+        _tapar_olhos(linhas)
+        _abrir_olhos(linhas, (3, 4, 5), (12, 13, 14))
+        linhas[OLHO_LINHA + 1][9] = "."   # a ponte entre as lentes
+    return _montar(linhas), 0, 0
+
+
+def pose_sono(quadro: int):
+    """Olhos semicerrados e corpo pesando para baixo."""
+    linhas = _base()
+    _tapar_olhos(linhas)
+    if quadro % 6 < 4:
+        _abrir_olhos(linhas, (4,), (14,), alturas=(OLHO_LINHA + 1,))  # so uma fresta
+        return _montar(linhas), 0, 1
+    _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_surpresa(quadro: int):
+    """Olhos arregalados e um pulinho de susto."""
+    linhas = _base()
+    _tapar_olhos(linhas)
+    if quadro % 6 < 4:
+        _abrir_olhos(linhas, (3, 4, 5), (13, 14, 15))
+        return _montar(linhas), 0, -2
+    _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_piscadela(quadro: int):
+    """Fecha so um olho."""
+    linhas = _base()
+    if quadro % 4 < 2:
+        for y in OLHO_LINHAS:
+            for x in OLHOS_PADRAO[0]:
+                linhas[y][x] = "#"
+    return _montar(linhas), 0, 0
+
+
+def pose_bracos(quadro: int):
+    """Levanta os dois bracos, como quem se espreguica."""
+    linhas = _base()
+    if quadro % 4 < 2:
+        _erguer_bracos(linhas)
+    return _montar(linhas), 0, 0
+
+
+def pose_pular(quadro: int):
+    """Dois pulos, com os pes recolhidos no ar."""
+    altura = (0, -3, -5, -3, 0, -3, -5, -3)[quadro % 8]
+    linhas = _base()
+    if altura < 0:                  # no ar as pernas se recolhem
+        for y in (10, 11):
+            for x in range(len(linhas[y])):
+                linhas[y][x] = "." if linhas[y][x] == "#" else linhas[y][x]
+        for y in (10, 11):
+            for x in (7, 8, 10, 11):
+                linhas[y][x] = "#"
+    return _montar(linhas), 0, altura
+
+
+def pose_dancar(quadro: int):
+    """Bamboleia de um lado para o outro."""
+    desloca = (-3, 0, 3, 0)[quadro % 4]
+    return _montar(_base()), desloca, 0
+
+
+def pose_sacudir(quadro: int):
+    """Tremida curta, como um arrepio."""
+    desloca = (-2, 2, -2, 2, -1, 1, 0, 0)[quadro % 8]
+    return _montar(_base()), desloca, 0
+
+
+def pose_cochilar(quadro: int):
+    """Fecha os olhos por um tempo e desperta."""
+    linhas = _base()
+    if quadro % 10 < 7:
+        _tapar_olhos(linhas)
+        return _montar(linhas), 0, 1
+    return _montar(linhas), 0, 0
+
+
+def pose_espiar(quadro: int):
+    """Espia para um lado e volta depressa, como quem ouviu algo."""
+    etapa = quadro % 6
+    linhas = _base()
+    _tapar_olhos(linhas)
+    if etapa < 3:
+        _abrir_olhos(linhas, (5, 6), (14, 15))
+        return _montar(linhas), 2, 0
+    _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_feliz(quadro: int):
+    """Olhos apertados, o `> <` que o mascote faz nas artes oficiais.
+
+    Cada olho vira uma diagonal: o vao desce uma linha no meio e volta, o que
+    em tres linhas ja le como um olho fechado de contentamento.
+    """
+    linhas = _base()
+    _tapar_olhos(linhas)
+    if quadro % 6 < 4:
+        topo, meio, base = OLHO_LINHAS
+        linhas[topo][4] = linhas[base][4] = "."      # esquerdo: >
+        linhas[meio][5] = "."
+        linhas[topo][14] = linhas[base][14] = "."    # direito: <
+        linhas[meio][13] = "."
+    else:
+        _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_oculos_sol(quadro: int):
+    """Baixa um par de oculos escuros: uma barra sobre os dois olhos."""
+    linhas = _base()
+    if quadro % 8 < 6:
+        _tapar_olhos(linhas)
+        meio = OLHO_LINHAS[1]
+        for x in range(3, 16):                        # a barra das lentes
+            linhas[meio][x] = "."
+        for x in (3, 4, 5, 13, 14, 15):               # as lentes, mais altas
+            linhas[meio - 1][x] = "."
+            linhas[meio + 1][x] = "."
+    else:
+        _abrir_olhos(linhas, *OLHOS_PADRAO)
+    return _montar(linhas), 0, 0
+
+
+def pose_piscar(quadro: int):
+    """Fecha e abre os dois olhos."""
+    linhas = _base()
+    if quadro % 2 == 0:
+        _tapar_olhos(linhas)
+    return _montar(linhas), 0, 0
+
+
+def pose_oi(quadro: int):
+    """Acena com o braco direito."""
+    return mascot_wave(quadro // 2), 0, 0
+
+
+def pose_passos(quadro: int):
+    """Pisa no lugar, alternando os pes."""
+    return mascot_frame(quadro), 0, (-1 if quadro % 2 else 0)
+
+
+POSES = {
+    "feliz": pose_feliz,
+    "oculos_sol": pose_oculos_sol,
+    "piscar": pose_piscar,
+    "oi": pose_oi,
+    "passos": pose_passos,
+    "olhar": pose_olhar,
+    "oculos": pose_oculos,
+    "sono": pose_sono,
+    "surpresa": pose_surpresa,
+    "piscadela": pose_piscadela,
+    "bracos": pose_bracos,
+    "pular": pose_pular,
+    "dancar": pose_dancar,
+    "sacudir": pose_sacudir,
+    "cochilar": pose_cochilar,
+    "espiar": pose_espiar,
+}
+
+
+def render_pose(pose: str, quadro: int, scale: int = 2, bg: str | None = None):
+    """Imagem de uma pose na skin ativa, com o deslocamento que ela pede."""
+    arte, dx, dy = POSES[pose](quadro)
+    bg = bg or P["bg"]
+    composta, linhas_topo = compor_skin(arte)
+
+    key = ("pose", pose, quadro, scale, bg, get_skin())
+    imagem = _MASCOT_CACHE.get(key)
+    if imagem is None:
+        imagem = pintar(composta, scale, bg)
+        _MASCOT_CACHE[key] = imagem
+    return imagem, dx * scale, dy * scale - (linhas_topo * scale) / 2
